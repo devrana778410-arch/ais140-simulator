@@ -1,20 +1,12 @@
-# Per-device tab panel — supports CGM, GPCB and VLTD profiles
+# Per-device panel — Clean, minimalist modern UI with toggleable Debug Drawer
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from typing import Callable, Optional
+import datetime
 from ..rto_data import get_rto_display_list, get_rto_coords, code_from_display
+from .styles import COLORS, FONTS
 
-
-STATUS_COLORS = {
-    "Stopped":      "#888888",
-    "Connecting":   "#f39c12",
-    "Connected":    "#27ae60",
-    "Sending":      "#2980b9",
-    "Error":        "#e74c3c",
-    "Disconnected": "#e74c3c",
-}
-
-PROFILES = ["CGM", "GPCB", "VLTD"]
+PROFILES = ["VLTD", "CGM", "GPCB"]
 
 # Server presets per profile
 PROFILE_SERVER = {
@@ -30,241 +22,389 @@ PROFILE_SERVER = {
 }
 
 
-class DeviceTab(ttk.Frame):
+class DeviceTab(tk.Frame):
     """
-    One tab in the notebook — represents one simulated device.
-
-    Profile field visibility:
-      CGM  → IMEI, Lat, Lon, Interval          (N/E hardcoded, no vreg shown)
-      GPCB → IMEI, Vehicle Reg, Lat, Lon, Int  (N/E hardcoded)
-      VLTD → IMEI, RTO dropdown, Interval      (lat/lon auto-filled from table,
-                                                manual push buttons for all 5 packets,
-                                                auto-emergency ON/OFF option)
-
-    Calls on_start(cfg) / on_stop() / on_sos(mode) / on_push_single(ptype).
+    Modern Device Panel.
+    Clean minimalist view by default:
+      - Profile picker
+      - Minimal inputs (IMEI, RTO dropdown, Interval)
+      - Hero Stat Card with large Packets Sent counter
+      - High-visibility Start / Stop button
+      - Emergency ON / OFF buttons (for VLTD)
+    All technical diagnostic clutter (logs, raw ports, HMAC key, manual packet pushes)
+    is tucked away inside a Debug Drawer, visible only when Debug Mode is enabled.
     """
 
-    def __init__(self, parent, device_num: int,
-                 on_start: Callable, on_stop: Callable,
-                 on_remove: Callable,
-                 on_sos: Optional[Callable] = None,
-                 on_push_single: Optional[Callable] = None,
-                 **kwargs):
-        super().__init__(parent, **kwargs)
-        self._dev_num        = device_num
-        self._on_start       = on_start
-        self._on_stop        = on_stop
-        self._on_remove      = on_remove
-        self._on_sos         = on_sos
-        self._on_push_single = on_push_single
-        self._running        = False
-        self._rto_list       = get_rto_display_list()
+    def __init__(
+        self,
+        parent,
+        device_num: int,
+        on_start: Callable,
+        on_stop: Callable,
+        on_remove: Callable,
+        on_sos: Optional[Callable] = None,
+        on_push_single: Optional[Callable] = None,
+        on_profile_change_cb: Optional[Callable] = None,
+        **kwargs,
+    ):
+        super().__init__(parent, bg=COLORS["bg_app"], **kwargs)
+        self._dev_num              = device_num
+        self._on_start             = on_start
+        self._on_stop              = on_stop
+        self._on_remove            = on_remove
+        self._on_sos               = on_sos
+        self._on_push_single       = on_push_single
+        self._on_profile_change_cb = on_profile_change_cb
+        self._running              = False
+        self._debug_mode           = False
+        self._rto_list             = get_rto_display_list()
 
         self._build_ui(device_num)
 
     # ------------------------------------------------------------------ #
-    #  UI Construction                                                     #
+    #  UI Construction                                                   #
     # ------------------------------------------------------------------ #
 
     def _build_ui(self, num: int) -> None:
-        self.columnconfigure(1, weight=1)
-        pad = {"padx": 6, "pady": 3}
+        self.columnconfigure(0, weight=1)
 
-        # --- Row 0: Profile selector ---
-        ttk.Label(self, text="Profile:").grid(row=0, column=0, sticky="w", **pad)
-        self._profile_var = tk.StringVar(value="CGM")
-        profile_cb = ttk.Combobox(
-            self, textvariable=self._profile_var,
-            values=PROFILES, state="readonly", width=8
+        # ---------------- 1. Device Header Bar ---------------- #
+        header_frame = tk.Frame(self, bg=COLORS["bg_app"])
+        header_frame.pack(fill="x", padx=16, pady=(14, 10))
+
+        title_box = tk.Frame(header_frame, bg=COLORS["bg_app"])
+        title_box.pack(side="left")
+
+        self._title_lbl = tk.Label(
+            title_box, text=f"Device {num}", font=FONTS["brand_title"],
+            fg=COLORS["text_primary"], bg=COLORS["bg_app"]
         )
-        profile_cb.grid(row=0, column=1, sticky="w", **pad)
-        profile_cb.bind("<<ComboboxSelected>>", self._on_profile_change)
+        self._title_lbl.pack(anchor="w")
 
-        # --- Row 1: IMEI ---
-        ttk.Label(self, text="IMEI:").grid(row=1, column=0, sticky="w", **pad)
-        self._imei = ttk.Entry(self, width=20)
-        self._imei.insert(0, "866224083766096")
-        self._imei.grid(row=1, column=1, sticky="ew", **pad)
+        self._subtitle_lbl = tk.Label(
+            title_box, text="Vehicle Location Tracking Simulator",
+            font=FONTS["caption"], fg=COLORS["text_secondary"], bg=COLORS["bg_app"]
+        )
+        self._subtitle_lbl.pack(anchor="w")
 
-        # --- Row 2: Vehicle Reg (CGM hidden, GPCB visible) ---
-        self._vreg_label = ttk.Label(self, text="Vehicle Reg:")
-        self._vreg_label.grid(row=2, column=0, sticky="w", **pad)
-        self._vreg = ttk.Entry(self, width=16)
+        # Right side: Profile switcher + Remove button
+        actions_box = tk.Frame(header_frame, bg=COLORS["bg_app"])
+        actions_box.pack(side="right")
+
+        tk.Label(
+            actions_box, text="Profile:", font=FONTS["body_bold"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_app"]
+        ).pack(side="left", padx=(0, 6))
+
+        self._profile_var = tk.StringVar(value="VLTD")
+        self._profile_cb = ttk.Combobox(
+            actions_box, textvariable=self._profile_var,
+            values=PROFILES, state="readonly", width=8, font=FONTS["body_bold"]
+        )
+        self._profile_cb.pack(side="left", padx=(0, 14))
+        self._profile_cb.bind("<<ComboboxSelected>>", self._on_profile_change)
+
+        self._remove_btn = tk.Button(
+            actions_box, text="✕ Remove", font=FONTS["caption"],
+            bg=COLORS["bg_card"], fg=COLORS["danger"], activebackground=COLORS["danger"],
+            activeforeground="white", relief="flat", bd=0, padx=8, pady=4,
+            cursor="hand2", command=self._on_remove
+        )
+        self._remove_btn.pack(side="left")
+
+        # ---------------- 2. Hero Metric & Action Card ---------------- #
+        hero_card = tk.Frame(
+            self, bg=COLORS["bg_card"], highlightbackground=COLORS["border"],
+            highlightthickness=1, padx=16, pady=14
+        )
+        hero_card.pack(fill="x", padx=16, pady=(0, 12))
+        hero_card.columnconfigure(0, weight=1)
+        hero_card.columnconfigure(1, weight=1)
+
+        # Left: Live Status + Primary Start/Stop Button
+        hero_left = tk.Frame(hero_card, bg=COLORS["bg_card"])
+        hero_left.grid(row=0, column=0, sticky="w")
+
+        status_row = tk.Frame(hero_left, bg=COLORS["bg_card"])
+        status_row.pack(anchor="w", pady=(0, 8))
+
+        self._status_dot = tk.Label(
+            status_row, text="●", font=("Segoe UI", 12),
+            fg=COLORS["stopped"], bg=COLORS["bg_card"]
+        )
+        self._status_dot.pack(side="left", padx=(0, 6))
+
+        self._status_badge = tk.Label(
+            status_row, text="STOPPED", font=FONTS["badge"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
+        )
+        self._status_badge.pack(side="left")
+
+        # Prominent Start / Stop Button
+        self._start_stop_btn = tk.Button(
+            hero_left, text="▶  START SIMULATOR", font=FONTS["btn_large"],
+            bg=COLORS["success"], fg="#ffffff", activebackground=COLORS["success_hover"],
+            activeforeground="#ffffff", relief="flat", bd=0, padx=22, pady=10,
+            cursor="hand2", command=self._toggle_start_stop
+        )
+        self._start_stop_btn.pack(anchor="w")
+
+        # Right: Large Packets Sent Counter
+        hero_right = tk.Frame(hero_card, bg=COLORS["bg_card"])
+        hero_right.grid(row=0, column=1, sticky="e")
+
+        tk.Label(
+            hero_right, text="PACKETS TRANSMITTED", font=FONTS["stat_lbl"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
+        ).pack(anchor="e")
+
+        self._count_var = tk.StringVar(value="0")
+        self._count_display = tk.Label(
+            hero_right, textvariable=self._count_var, font=FONTS["stat_num"],
+            fg=COLORS["text_primary"], bg=COLORS["bg_card"]
+        )
+        self._count_display.pack(anchor="e")
+
+        # ---------------- 3. Configuration Inputs Card ---------------- #
+        self._inputs_card = tk.Frame(
+            self, bg=COLORS["bg_card"], highlightbackground=COLORS["border"],
+            highlightthickness=1, padx=16, pady=14
+        )
+        self._inputs_card.pack(fill="x", padx=16, pady=(0, 12))
+        self._inputs_card.columnconfigure(1, weight=1)
+
+        # Field: IMEI
+        tk.Label(
+            self._inputs_card, text="IMEI Number:", font=FONTS["body_bold"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
+        ).grid(row=0, column=0, sticky="w", pady=6)
+
+        self._imei = tk.Entry(
+            self._inputs_card, font=FONTS["input"], bg=COLORS["bg_input"],
+            fg=COLORS["text_primary"], insertbackground=COLORS["text_primary"],
+            relief="flat", highlightbackground=COLORS["border"], highlightthickness=1
+        )
+        self._imei.insert(0, "860560067225419")
+        self._imei.grid(row=0, column=1, sticky="ew", padx=(12, 0), pady=6)
+
+        # Field: Vehicle Registration (GPCB only)
+        self._vreg_lbl = tk.Label(
+            self._inputs_card, text="Vehicle Reg:", font=FONTS["body_bold"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
+        )
+        self._vreg = tk.Entry(
+            self._inputs_card, font=FONTS["input"], bg=COLORS["bg_input"],
+            fg=COLORS["text_primary"], insertbackground=COLORS["text_primary"],
+            relief="flat", highlightbackground=COLORS["border"], highlightthickness=1
+        )
         self._vreg.insert(0, "GJ01AC0000")
-        self._vreg.grid(row=2, column=1, sticky="ew", **pad)
 
-        # --- Row 3: RTO dropdown (VLTD only) ---
-        self._rto_label = ttk.Label(self, text="RTO:")
-        self._rto_label.grid(row=3, column=0, sticky="w", **pad)
-        rto_container = ttk.Frame(self)
-        rto_container.grid(row=3, column=1, sticky="ew", **pad)
-        rto_container.columnconfigure(0, weight=1)
+        # Field: RTO Location Dropdown (VLTD only)
+        self._rto_lbl = tk.Label(
+            self._inputs_card, text="RTO Location:", font=FONTS["body_bold"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
+        )
+        self._rto_lbl.grid(row=1, column=0, sticky="w", pady=6)
+
+        self._rto_container = tk.Frame(self._inputs_card, bg=COLORS["bg_card"])
+        self._rto_container.grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=6)
+        self._rto_container.columnconfigure(0, weight=1)
 
         self._rto_var = tk.StringVar()
         self._rto_cb = ttk.Combobox(
-            rto_container, textvariable=self._rto_var,
-            values=self._rto_list, state="readonly", width=28
+            self._rto_container, textvariable=self._rto_var,
+            values=self._rto_list, state="readonly", font=FONTS["input"]
         )
+        # Select GJ-16 Ankleshwar/Bharuch or default to first
+        sel_idx = 0
+        for i, opt in enumerate(self._rto_list):
+            if "GJ-16" in opt:
+                sel_idx = i
+                break
         if self._rto_list:
-            self._rto_cb.set(self._rto_list[0])
+            self._rto_cb.set(self._rto_list[sel_idx])
         self._rto_cb.grid(row=0, column=0, sticky="ew")
         self._rto_cb.bind("<<ComboboxSelected>>", self._on_rto_change)
 
-        self._rto_coord_lbl = ttk.Label(
-            rto_container, text="", font=("Consolas", 8), foreground="#555555"
+        self._rto_coord_lbl = tk.Label(
+            self._rto_container, text="", font=FONTS["caption"],
+            fg=COLORS["text_accent"], bg=COLORS["bg_card"]
         )
-        self._rto_coord_lbl.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        self._rto_coord_lbl.grid(row=1, column=0, sticky="w", pady=(3, 0))
         self._update_rto_preview()
 
-        # --- Row 4: Latitude ---
-        self._lat_label = ttk.Label(self, text="Latitude:")
-        self._lat_label.grid(row=4, column=0, sticky="w", **pad)
-        lat_frame = ttk.Frame(self)
-        lat_frame.grid(row=4, column=1, sticky="ew", **pad)
-        self._lat = ttk.Entry(lat_frame, width=12)
+        # Fields: Manual Lat / Lon (CGM / GPCB)
+        self._lat_lbl = tk.Label(
+            self._inputs_card, text="Latitude:", font=FONTS["body_bold"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
+        )
+        self._lat_frame = tk.Frame(self._inputs_card, bg=COLORS["bg_card"])
+        self._lat = tk.Entry(
+            self._lat_frame, font=FONTS["input"], bg=COLORS["bg_input"],
+            fg=COLORS["text_primary"], insertbackground=COLORS["text_primary"],
+            relief="flat", highlightbackground=COLORS["border"], highlightthickness=1, width=14
+        )
         self._lat.insert(0, "21.749826")
         self._lat.pack(side="left")
-        ttk.Label(lat_frame, text="N").pack(side="left", padx=(4, 0))
+        tk.Label(self._lat_frame, text="°N", fg=COLORS["text_secondary"], bg=COLORS["bg_card"]).pack(side="left", padx=4)
 
-        # --- Row 5: Longitude ---
-        self._lon_label = ttk.Label(self, text="Longitude:")
-        self._lon_label.grid(row=5, column=0, sticky="w", **pad)
-        lon_frame = ttk.Frame(self)
-        lon_frame.grid(row=5, column=1, sticky="ew", **pad)
-        self._lon = ttk.Entry(lon_frame, width=12)
+        self._lon_lbl = tk.Label(
+            self._inputs_card, text="Longitude:", font=FONTS["body_bold"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
+        )
+        self._lon_frame = tk.Frame(self._inputs_card, bg=COLORS["bg_card"])
+        self._lon = tk.Entry(
+            self._lon_frame, font=FONTS["input"], bg=COLORS["bg_input"],
+            fg=COLORS["text_primary"], insertbackground=COLORS["text_primary"],
+            relief="flat", highlightbackground=COLORS["border"], highlightthickness=1, width=14
+        )
         self._lon.insert(0, "73.098231")
         self._lon.pack(side="left")
-        ttk.Label(lon_frame, text="E").pack(side="left", padx=(4, 0))
+        tk.Label(self._lon_frame, text="°E", fg=COLORS["text_secondary"], bg=COLORS["bg_card"]).pack(side="left", padx=4)
 
-        # --- Row 6: Interval ---
-        ttk.Label(self, text="Interval (s):").grid(row=6, column=0, sticky="w", **pad)
-        self._interval = ttk.Spinbox(self, from_=1, to=3600, width=6)
+        # Field: Interval
+        tk.Label(
+            self._inputs_card, text="Interval (sec):", font=FONTS["body_bold"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
+        ).grid(row=3, column=0, sticky="w", pady=6)
+
+        interval_box = tk.Frame(self._inputs_card, bg=COLORS["bg_card"])
+        interval_box.grid(row=3, column=1, sticky="w", padx=(12, 0), pady=6)
+
+        self._interval = tk.Spinbox(
+            interval_box, from_=1, to=3600, width=6, font=FONTS["input"],
+            bg=COLORS["bg_input"], fg=COLORS["text_primary"],
+            insertbackground=COLORS["text_primary"], relief="flat",
+            highlightbackground=COLORS["border"], highlightthickness=1
+        )
         self._interval.delete(0, "end")
         self._interval.insert(0, "10")
-        self._interval.grid(row=6, column=1, sticky="w", **pad)
+        self._interval.pack(side="left")
 
-        # --- Row 7: Auto SOS Option (VLTD only) ---
+        # Field: Auto SOS cycle (VLTD only)
         self._auto_sos_var = tk.BooleanVar(value=True)
         self._auto_sos_cb = ttk.Checkbutton(
-            self, text="Auto-push Emergency ON & OFF cycle during continuous run",
-            variable=self._auto_sos_var
+            interval_box, text="Auto-test Emergency ON & OFF cycle during run",
+            variable=self._auto_sos_var, style="Card.TCheckbutton"
         )
-        self._auto_sos_cb.grid(row=7, column=0, columnspan=2, sticky="w", padx=6, pady=2)
+        self._auto_sos_cb.pack(side="left", padx=(16, 0))
 
-        # --- Row 8: Main Start/Stop/Remove buttons ---
-        btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=8, column=0, columnspan=2, pady=(4, 2))
+        # ---------------- 4. Emergency Action Row (VLTD only) ---------------- #
+        self._emg_frame = tk.Frame(
+            self, bg=COLORS["bg_card"], highlightbackground=COLORS["border"],
+            highlightthickness=1, padx=16, pady=10
+        )
+        self._emg_frame.pack(fill="x", padx=16, pady=(0, 12))
 
-        self._start_btn = ttk.Button(btn_frame, text="▶  Start", command=self._on_start_click, width=11)
-        self._start_btn.pack(side="left", padx=3)
-
-        self._stop_btn = ttk.Button(btn_frame, text="■  Stop", command=self._on_stop_click,
-                                    width=11, state="disabled")
-        self._stop_btn.pack(side="left", padx=3)
-
-        self._remove_btn = ttk.Button(btn_frame, text="✕ Remove", command=self._on_remove, width=9)
-        self._remove_btn.pack(side="left", padx=3)
-
-        # Live Emergency toggle buttons (active during run)
-        self._sos_frame = ttk.Frame(btn_frame)
-        self._sos_frame.pack(side="left", padx=(10, 0))
+        tk.Label(
+            self._emg_frame, text="Emergency Response:", font=FONTS["body_bold"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
+        ).pack(side="left", padx=(0, 12))
 
         self._sos_on_btn = tk.Button(
-            self._sos_frame, text="🚨 SOS ON", bg="#c0392b", fg="white",
-            activebackground="#e74c3c", activeforeground="white",
-            font=("Segoe UI", 9, "bold"), width=10, relief="raised",
-            command=lambda: self._trigger_sos("EMR"), state="disabled"
+            self._emg_frame, text="🚨  SOS ON (EMR)", font=FONTS["btn_normal"],
+            bg=COLORS["danger"], fg="#ffffff", activebackground=COLORS["danger_hover"],
+            activeforeground="#ffffff", relief="flat", bd=0, padx=14, pady=6,
+            cursor="hand2", command=lambda: self._trigger_sos("EMR"), state="disabled"
         )
-        self._sos_on_btn.pack(side="left", padx=2)
+        self._sos_on_btn.pack(side="left", padx=4)
 
         self._sos_off_btn = tk.Button(
-            self._sos_frame, text="🛡️ SOS OFF", bg="#2980b9", fg="white",
-            activebackground="#3498db", activeforeground="white",
-            font=("Segoe UI", 9, "bold"), width=10, relief="raised",
-            command=lambda: self._trigger_sos("SEM"), state="disabled"
+            self._emg_frame, text="🛡️  SOS OFF (SEM)", font=FONTS["btn_normal"],
+            bg=COLORS["info"], fg="#ffffff", activebackground=COLORS["info_hover"],
+            activeforeground="#ffffff", relief="flat", bd=0, padx=14, pady=6,
+            cursor="hand2", command=lambda: self._trigger_sos("SEM"), state="disabled"
         )
-        self._sos_off_btn.pack(side="left", padx=2)
+        self._sos_off_btn.pack(side="left", padx=4)
 
-        # --- Row 9: Manual Individual Packet Push Frame (VLTD only) ---
-        self._manual_frame = ttk.LabelFrame(
-            self, text="Push Individual Packet (Manual / On-Demand)  [9031: Primary | 9032: Emerg]"
+        # ---------------- 5. Debug Drawer (Technical diagnostics) ---------------- #
+        self._debug_drawer = ttk.LabelFrame(
+            self, text="⚙️ Debug Mode — Technical Diagnostics & Packet Inspector",
+            style="Debug.TLabelframe", padding=(12, 8)
         )
-        self._manual_frame.grid(row=9, column=0, columnspan=2, sticky="ew", padx=6, pady=(4, 4))
+        # Note: self._debug_drawer is packed/unpacked dynamically via set_debug_mode()
 
-        ttk.Button(
-            self._manual_frame, text="🔑 Login ($LGN) :9031", width=20,
-            command=lambda: self._on_manual_push("LGN")
-        ).pack(side="left", padx=3, pady=4)
+        # Debug Row 1: Server endpoints & CGM HMAC
+        self._debug_srv_lbl = tk.Label(
+            self._debug_drawer, text="", font=FONTS["code"],
+            fg=COLORS["text_accent"], bg=COLORS["bg_input"]
+        )
+        self._debug_srv_lbl.pack(anchor="w", pady=(0, 6))
 
-        ttk.Button(
-            self._manual_frame, text="🩺 Health ($HEL) :9031", width=20,
-            command=lambda: self._on_manual_push("HEL")
-        ).pack(side="left", padx=3, pady=4)
+        # CGM HMAC key frame
+        self._hmac_frame = tk.Frame(self._debug_drawer, bg=COLORS["bg_input"])
+        tk.Label(
+            self._hmac_frame, text="HMAC Key:", font=FONTS["body_bold"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_input"]
+        ).pack(side="left", padx=(0, 6))
+        self._hmac_var = tk.StringVar(value="26bcb9e368440d4a")
+        self._hmac_entry = tk.Entry(
+            self._hmac_frame, textvariable=self._hmac_var, width=20,
+            font=FONTS["code"], bg=COLORS["bg_card"], fg=COLORS["text_primary"],
+            relief="flat", highlightbackground=COLORS["border"], highlightthickness=1
+        )
+        self._hmac_entry.pack(side="left")
 
-        ttk.Button(
-            self._manual_frame, text="📍 Position ($PVT) :9031", width=21,
-            command=lambda: self._on_manual_push("PVT")
-        ).pack(side="left", padx=3, pady=4)
+        # Debug Row 2: Manual Packet Push Buttons
+        self._debug_btns_frame = tk.Frame(self._debug_drawer, bg=COLORS["bg_input"])
+        self._debug_btns_frame.pack(fill="x", pady=(4, 8))
+
+        tk.Label(
+            self._debug_btns_frame, text="Direct Push:", font=FONTS["caption"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_input"]
+        ).pack(side="left", padx=(0, 6))
+
+        for ptype, lbl in [
+            ("LGN", "LGN :9031"),
+            ("HEL", "HEL :9031"),
+            ("PVT", "PVT :9031"),
+            ("EMR", "EMR :9032"),
+            ("SEM", "SEM :9032"),
+        ]:
+            ttk.Button(
+                self._debug_btns_frame, text=lbl,
+                command=lambda p=ptype: self._on_manual_push(p)
+            ).pack(side="left", padx=2)
+
+        # Debug Row 3: Log Stream
+        log_header = tk.Frame(self._debug_drawer, bg=COLORS["bg_input"])
+        log_header.pack(fill="x", pady=(2, 4))
+        tk.Label(
+            log_header, text="Socket Transmission Log:", font=FONTS["caption"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_input"]
+        ).pack(side="left")
 
         tk.Button(
-            self._manual_frame, text="🚨 Emerg. ON :9032", bg="#c0392b", fg="white",
-            activebackground="#e74c3c", activeforeground="white",
-            font=("Segoe UI", 8, "bold"), width=16, relief="raised",
-            command=lambda: self._on_manual_push("EMR")
-        ).pack(side="left", padx=3, pady=4)
+            log_header, text="Clear", font=FONTS["caption"], bg=COLORS["bg_card"],
+            fg=COLORS["text_secondary"], relief="flat", bd=0, padx=6, pady=1,
+            cursor="hand2", command=self.clear_log
+        ).pack(side="right", padx=(4, 0))
 
         tk.Button(
-            self._manual_frame, text="🛡️ Emerg. OFF :9032", bg="#2980b9", fg="white",
-            activebackground="#3498db", activeforeground="white",
-            font=("Segoe UI", 8, "bold"), width=16, relief="raised",
-            command=lambda: self._on_manual_push("SEM")
-        ).pack(side="left", padx=3, pady=4)
+            log_header, text="Export", font=FONTS["caption"], bg=COLORS["bg_card"],
+            fg=COLORS["text_secondary"], relief="flat", bd=0, padx=6, pady=1,
+            cursor="hand2", command=self._export_log
+        ).pack(side="right")
 
-        # --- Row 10: Status bar ---
-        status_frame = ttk.Frame(self)
-        status_frame.grid(row=10, column=0, columnspan=2, sticky="ew", padx=6)
+        self._log = tk.Text(
+            self._debug_drawer, height=7, wrap="none", font=FONTS["code"],
+            state="disabled", bg="#050811", fg="#38bdf8", relief="flat",
+            highlightbackground=COLORS["border"], highlightthickness=1
+        )
+        self._log.pack(fill="both", expand=True)
 
-        ttk.Label(status_frame, text="Status:").pack(side="left")
-        self._status_dot = tk.Label(status_frame, text="●", fg="#888888",
-                                    bg=self.winfo_toplevel().cget("bg"))
-        self._status_dot.pack(side="left", padx=(2, 0))
-        self._status_lbl = ttk.Label(status_frame, text="Stopped")
-        self._status_lbl.pack(side="left", padx=(2, 10))
-
-        ttk.Label(status_frame, text="Packets:").pack(side="left")
-        self._count_var = tk.StringVar(value="0")
-        ttk.Label(status_frame, textvariable=self._count_var, width=6).pack(side="left")
-
-        # --- Row 11: Mini log ---
-        log_frame = ttk.LabelFrame(self, text="Device Log")
-        log_frame.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=6, pady=(4, 6))
-        self.rowconfigure(11, weight=1)
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-
-        self._log = tk.Text(log_frame, height=8, wrap="none",
-                            font=("Consolas", 8), state="disabled",
-                            bg="#1e1e1e", fg="#d4d4d4")
-        self._log.grid(row=0, column=0, sticky="nsew")
-
-        vsb = ttk.Scrollbar(log_frame, orient="vertical", command=self._log.yview)
-        vsb.grid(row=0, column=1, sticky="ns")
-        self._log["yscrollcommand"] = vsb.set
-
-        hsb = ttk.Scrollbar(log_frame, orient="horizontal", command=self._log.xview)
-        hsb.grid(row=1, column=0, sticky="ew")
-        self._log["xscrollcommand"] = hsb.set
-
-        # Apply initial profile visibility
-        self._apply_profile_visibility("CGM")
+        # Apply profile-specific view rules
+        self._apply_profile_visibility("VLTD")
 
     # ------------------------------------------------------------------ #
-    #  Profile & RTO switching                                             #
+    #  Profile and Input Visibility                                      #
     # ------------------------------------------------------------------ #
 
     def _on_profile_change(self, event=None) -> None:
         profile = self._profile_var.get()
         self._apply_profile_visibility(profile)
+        if self._on_profile_change_cb:
+            self._on_profile_change_cb(self._dev_num, profile)
 
     def _on_rto_change(self, event=None) -> None:
         self._update_rto_preview()
@@ -274,66 +414,89 @@ class DeviceTab(ttk.Frame):
         if rto_display:
             code = code_from_display(rto_display)
             lat, lon = get_rto_coords(code)
-            self._rto_coord_lbl.config(text=f"Coordinates: {lat:.6f}°N, {lon:.6f}°E")
+            self._rto_coord_lbl.config(text=f"GPS Target: {lat:.6f}°N, {lon:.6f}°E")
 
     def _apply_profile_visibility(self, profile: str) -> None:
-        """Show/hide rows based on selected profile."""
-        if profile == "CGM":
-            self._vreg_label.grid_remove()
+        """Update field layouts based on active profile."""
+        srv = PROFILE_SERVER.get(profile, PROFILE_SERVER["VLTD"])
+        if profile == "VLTD":
+            srv_text = f"Server: {srv['host']}  |  Primary: :{srv['port']}  |  Emergency: :{srv.get('emergency_port', 9032)}"
+        else:
+            srv_text = f"Server: {srv['host']}:{srv['port']}"
+        self._debug_srv_lbl.config(text=srv_text)
+
+        if profile == "VLTD":
+            self._vreg_lbl.grid_remove()
             self._vreg.grid_remove()
-            self._rto_label.grid_remove()
-            self._rto_cb.master.grid_remove()
-            self._lat_label.grid()
-            self._lat.master.grid()
-            self._lon_label.grid()
-            self._lon.master.grid()
-            self._auto_sos_cb.grid_remove()
-            self._sos_frame.pack_forget()
-            self._manual_frame.grid_remove()
+            self._rto_lbl.grid()
+            self._rto_container.grid()
+            self._lat_lbl.grid_remove()
+            self._lat_frame.grid_remove()
+            self._lon_lbl.grid_remove()
+            self._lon_frame.grid_remove()
+            self._auto_sos_cb.pack(side="left", padx=(16, 0))
+            self._emg_frame.pack(fill="x", padx=16, pady=(0, 12))
+            self._hmac_frame.pack_forget()
+            self._debug_btns_frame.pack(fill="x", pady=(4, 8))
 
         elif profile == "GPCB":
-            self._vreg_label.grid()
-            self._vreg.grid()
-            self._rto_label.grid_remove()
-            self._rto_cb.master.grid_remove()
-            self._lat_label.grid()
-            self._lat.master.grid()
-            self._lon_label.grid()
-            self._lon.master.grid()
-            self._auto_sos_cb.grid_remove()
-            self._sos_frame.pack_forget()
-            self._manual_frame.grid_remove()
+            self._vreg_lbl.grid(row=1, column=0, sticky="w", pady=6)
+            self._vreg.grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=6)
+            self._rto_lbl.grid_remove()
+            self._rto_container.grid_remove()
+            self._lat_lbl.grid(row=2, column=0, sticky="w", pady=6)
+            self._lat_frame.grid(row=2, column=1, sticky="w", padx=(12, 0), pady=6)
+            self._lon_lbl.grid(row=3, column=0, sticky="w", pady=6)
+            self._lon_frame.grid(row=3, column=1, sticky="w", padx=(12, 0), pady=6)
+            self._auto_sos_cb.pack_forget()
+            self._emg_frame.pack_forget()
+            self._hmac_frame.pack_forget()
+            self._debug_btns_frame.pack_forget()
 
-        elif profile == "VLTD":
-            self._vreg_label.grid_remove()
+        elif profile == "CGM":
+            self._vreg_lbl.grid_remove()
             self._vreg.grid_remove()
-            self._rto_label.grid()
-            self._rto_cb.master.grid()
-            self._lat_label.grid_remove()
-            self._lat.master.grid_remove()
-            self._lon_label.grid_remove()
-            self._lon.master.grid_remove()
-            self._auto_sos_cb.grid()
-            self._sos_frame.pack(side="left", padx=(10, 0))
-            self._manual_frame.grid()
-            if self._running:
-                self._sos_on_btn.config(state="normal")
-                self._sos_off_btn.config(state="normal")
-            else:
-                self._sos_on_btn.config(state="disabled")
-                self._sos_off_btn.config(state="disabled")
+            self._rto_lbl.grid_remove()
+            self._rto_container.grid_remove()
+            self._lat_lbl.grid(row=1, column=0, sticky="w", pady=6)
+            self._lat_frame.grid(row=1, column=1, sticky="w", padx=(12, 0), pady=6)
+            self._lon_lbl.grid(row=2, column=0, sticky="w", pady=6)
+            self._lon_frame.grid(row=2, column=1, sticky="w", padx=(12, 0), pady=6)
+            self._auto_sos_cb.pack_forget()
+            self._emg_frame.pack_forget()
+            self._hmac_frame.pack(anchor="w", pady=(0, 6))
+            self._debug_btns_frame.pack_forget()
 
     # ------------------------------------------------------------------ #
-    #  Button handlers                                                     #
+    #  Debug Mode Toggle                                                 #
     # ------------------------------------------------------------------ #
+
+    def set_debug_mode(self, enabled: bool) -> None:
+        """Show or hide the technical diagnostics drawer."""
+        self._debug_mode = enabled
+        if enabled:
+            self._debug_drawer.pack(fill="both", expand=True, padx=16, pady=(0, 14))
+        else:
+            self._debug_drawer.pack_forget()
+
+    # ------------------------------------------------------------------ #
+    #  Button & Action Handlers                                          #
+    # ------------------------------------------------------------------ #
+
+    def _toggle_start_stop(self) -> None:
+        if not self._running:
+            self._on_start_click()
+        else:
+            self._on_stop_click()
 
     def _on_start_click(self) -> None:
         cfg = self._collect_config()
         if cfg is None:
             return
         self._running = True
-        self._start_btn.config(state="disabled")
-        self._stop_btn.config(state="normal")
+        self._start_stop_btn.config(
+            text="■  STOP SIMULATOR", bg=COLORS["danger"], activebackground=COLORS["danger_hover"]
+        )
         self._set_fields_state("disabled")
         if self._profile_var.get() == "VLTD":
             self._sos_on_btn.config(state="normal")
@@ -342,9 +505,12 @@ class DeviceTab(ttk.Frame):
 
     def _on_stop_click(self) -> None:
         self._running = False
-        self._stop_btn.config(state="disabled")
+        self._start_stop_btn.config(
+            text="▶  START SIMULATOR", bg=COLORS["success"], activebackground=COLORS["success_hover"]
+        )
         self._sos_on_btn.config(state="disabled")
         self._sos_off_btn.config(state="disabled")
+        self._set_fields_state("normal")
         self._on_stop()
 
     def _trigger_sos(self, mode: str) -> None:
@@ -353,23 +519,21 @@ class DeviceTab(ttk.Frame):
         cfg = self._collect_config()
         if cfg and self._on_sos:
             if mode == "EMR":
-                self._sos_on_btn.config(relief="sunken", text="🚨 ACTIVE")
-                self._sos_off_btn.config(relief="raised", text="🛡️ SOS OFF")
+                self._sos_on_btn.config(text="🚨 ACTIVE", relief="sunken")
+                self._sos_off_btn.config(text="🛡️ SOS OFF", relief="flat")
             else:
-                self._sos_on_btn.config(relief="raised", text="🚨 SOS ON")
-                self._sos_off_btn.config(relief="raised", text="🛡️ CLEARED")
-                self.after(2000, lambda: self._sos_off_btn.config(text="🛡️ SOS OFF"))
+                self._sos_on_btn.config(text="🚨 SOS ON", relief="flat")
+                self._sos_off_btn.config(text="🛡️ CLEARED", relief="sunken")
+                self.after(2000, lambda: self._sos_off_btn.config(text="🛡️ SOS OFF", relief="flat"))
             self._on_sos(self._dev_num, cfg, mode)
 
     def _on_manual_push(self, ptype: str) -> None:
-        """Called when user clicks any of the 5 manual packet push buttons."""
         cfg = self._collect_config()
         if cfg and self._on_push_single:
             self._on_push_single(self._dev_num, cfg, ptype)
 
     def _collect_config(self) -> dict | None:
         profile = self._profile_var.get()
-
         imei = self._imei.get().strip()
         if not imei or not imei.isdigit() or len(imei) < 10:
             messagebox.showerror("Invalid Input", "IMEI must be a numeric string (10-15 digits).")
@@ -382,7 +546,7 @@ class DeviceTab(ttk.Frame):
                 return None
             rto_code = code_from_display(rto_display)
             lat, lon = get_rto_coords(rto_code)
-            vreg = "GJ01AC0000"   # default for VLTD
+            vreg = "GJ01AC0000"
         else:
             try:
                 lat = float(self._lat.get().strip())
@@ -410,12 +574,14 @@ class DeviceTab(ttk.Frame):
             "rto":            rto_code,
             "auto_sos":       self._auto_sos_var.get(),
             "emergency_port": PROFILE_SERVER.get(profile, {}).get("emergency_port"),
+            "hmac_key":       self._hmac_var.get().strip().encode("ascii") if profile == "CGM" else None,
         }
 
     def _set_fields_state(self, state: str) -> None:
         profile = self._profile_var.get()
-        for w in (self._imei, self._interval):
-            w.config(state=state)
+        self._imei.config(state=state)
+        self._interval.config(state=state)
+        self._profile_cb.config(state="disabled" if state == "disabled" else "readonly")
         if profile == "GPCB":
             self._vreg.config(state=state)
         if profile in ("CGM", "GPCB"):
@@ -428,25 +594,38 @@ class DeviceTab(ttk.Frame):
     def get_profile(self) -> str:
         return self._profile_var.get()
 
+    def get_imei_suffix(self) -> str:
+        imei = self._imei.get().strip()
+        return imei[-6:] if len(imei) >= 6 else imei
+
     # ------------------------------------------------------------------ #
-    #  Public update methods (called via root.after from worker thread)   #
+    #  Public State Updates (called from GUI thread)                     #
     # ------------------------------------------------------------------ #
 
     def set_status(self, status: str, count: int) -> None:
-        color = STATUS_COLORS.get(status, "#888888")
-        self._status_dot.config(fg=color)
-        self._status_lbl.config(text=status)
         self._count_var.set(str(count))
+        self._status_badge.config(text=status.upper())
+
+        if status == "Sending":
+            self._status_dot.config(fg=COLORS["success"])
+            self._status_badge.config(fg=COLORS["success"])
+        elif status in ("Connecting", "Connected"):
+            self._status_dot.config(fg=COLORS["warning"])
+            self._status_badge.config(fg=COLORS["warning"])
+        else:
+            self._status_dot.config(fg=COLORS["stopped"])
+            self._status_badge.config(fg=COLORS["text_secondary"])
 
         if status == "Stopped":
-            self._start_btn.config(state="normal")
-            self._stop_btn.config(state="disabled")
-            self._sos_on_btn.config(state="disabled", relief="raised", text="🚨 SOS ON")
-            self._sos_off_btn.config(state="disabled", relief="raised", text="🛡️ SOS OFF")
+            self._running = False
+            self._start_stop_btn.config(
+                text="▶  START SIMULATOR", bg=COLORS["success"], activebackground=COLORS["success_hover"]
+            )
+            self._sos_on_btn.config(state="disabled", text="🚨 SOS ON")
+            self._sos_off_btn.config(state="disabled", text="🛡️ SOS OFF")
             self._set_fields_state("normal")
 
     def append_log(self, msg: str) -> None:
-        import datetime
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self._log.config(state="normal")
         self._log.insert("end", f"[{ts}] {msg}\n")
@@ -457,3 +636,15 @@ class DeviceTab(ttk.Frame):
         self._log.config(state="normal")
         self._log.delete("1.0", "end")
         self._log.config(state="disabled")
+
+    def _export_log(self) -> None:
+        path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            initialfile=f"device_{self._dev_num}_log_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+        )
+        if path:
+            content = self._log.get("1.0", "end")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+            messagebox.showinfo("Exported", f"Log saved to:\n{path}")

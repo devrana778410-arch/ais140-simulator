@@ -1,123 +1,170 @@
-# Main application window
+# Main application window — Modern Minimalist Sidebar Layout with Toggleable Debug Mode
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox
 import datetime
 from .device_tab import DeviceTab, PROFILE_SERVER
+from .styles import COLORS, FONTS, apply_theme
 from ..client import DeviceClient
 from ..packet import build_packet as build_cgm_packet
 from ..gpcb_packet import build_packet as build_gpcb_packet
-from ..vltd_packet import (
-    build_packet as build_vltd_packet,
-    build_emergency_packet,
-)
+from ..vltd_packet import build_packet as build_vltd_packet
 
-
-# Profile -> periodic packet builder function
 PACKET_BUILDERS = {
     "CGM":  build_cgm_packet,
     "GPCB": build_gpcb_packet,
     "VLTD": build_vltd_packet,
 }
 
-CGM_HMAC_KEY   = "26bcb9e368440d4a"
-CGM_HMAC_BYTES = CGM_HMAC_KEY.encode("ascii")
+PROFILE_BADGE_COLORS = {
+    "VLTD": ("#38bdf8", "#082f49"),  # Sky text on deep sky
+    "CGM":  ("#a78bfa", "#2e1065"),  # Violet text on deep violet
+    "GPCB": ("#34d399", "#064e3b"),  # Emerald text on deep emerald
+}
 
 
 class SimulatorApp:
     """
-    Main AIS-140 Simulator window.
-    Supports multiple simultaneous device tabs (CGM / GPCB / VLTD),
-    each with its own TCP connection and packet builder.
+    Modern AIS-140 Simulator Window.
+    Sidebar + Viewport layout:
+      - Left sidebar lists active devices with real-time status and packet counts.
+      - Right viewport renders the active device's clean, minimalist interface.
+      - Debug Mode toggle switch reveals technical diagnostics on-demand.
     """
 
     APP_TITLE   = "AIS-140 Simulator"
-    APP_VERSION = "v1.2"
+    APP_VERSION = "v2.0"
 
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title(f"{self.APP_TITLE}  {self.APP_VERSION}")
-        self.root.minsize(860, 680)
+        self.root.title(f"{self.APP_TITLE} {self.APP_VERSION}")
+        self.root.minsize(880, 620)
+        self.root.geometry("980x680")
         self.root.resizable(True, True)
 
-        # device_id -> (DeviceTab, DeviceClient | None)
-        self._devices: dict[int, tuple] = {}
+        apply_theme(self.root)
+
+        # device_id -> { "tab": DeviceTab, "client": DeviceClient | None, "tile": dict }
+        self._devices: dict[int, dict] = {}
+        self._selected_id: int | None = None
         self._next_id = 1
+        self._debug_mode = False
 
         self._build_ui()
-        self._add_device()   # start with one device tab
+        self._setup_shortcuts()
+        self._add_device()
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ------------------------------------------------------------------ #
-    #  UI Construction                                                     #
+    #  UI Construction                                                   #
     # ------------------------------------------------------------------ #
 
     def _build_ui(self) -> None:
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(2, weight=3)
-        self.root.rowconfigure(3, weight=1)
+        # Two-column grid: col 0 = Sidebar (fixed width), col 1 = Content (expands)
+        self.root.columnconfigure(1, weight=1)
+        self.root.rowconfigure(0, weight=1)
 
-        # ---- Top: info bar ----
-        info_frame = ttk.LabelFrame(self.root, text="AIS-140 Multi-Profile Simulator")
-        info_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 2))
-        info_frame.columnconfigure(0, weight=1)
+        # ---------------- Left Sidebar ---------------- #
+        self._sidebar = tk.Frame(
+            self.root, bg=COLORS["bg_sidebar"], width=230,
+            highlightbackground=COLORS["border"], highlightthickness=1
+        )
+        self._sidebar.grid(row=0, column=0, sticky="nsew")
+        self._sidebar.pack_propagate(False)
 
-        ttk.Label(
-            info_frame,
-            text="CGM: 103.234.162.150:5013  |  GPCB: 103.234.162.31:9999  |  VLTD: commonlayer.parivahan.gov.in (Primary: 9031, Emerg: 9032)",
-            font=("Consolas", 8),
-            foreground="#444444",
-        ).grid(row=0, column=0, padx=8, pady=4, sticky="w")
+        # Brand header
+        brand_frame = tk.Frame(self._sidebar, bg=COLORS["bg_sidebar"])
+        brand_frame.pack(fill="x", padx=14, pady=(16, 14))
 
-        # CGM HMAC key
-        key_frame = ttk.Frame(info_frame)
-        key_frame.grid(row=0, column=1, padx=(6, 8), pady=4, sticky="e")
-        ttk.Label(key_frame, text="CGM HMAC:").pack(side="left", padx=(0, 2))
-        self._hmac_var = tk.StringVar(value=CGM_HMAC_KEY)
-        self._hmac_entry = ttk.Entry(key_frame, textvariable=self._hmac_var, width=18, show="*")
-        self._hmac_entry.pack(side="left", padx=2)
-        self._show_key = False
-        ttk.Button(key_frame, text="Show", width=5,
-                   command=self._toggle_key_visibility).pack(side="left", padx=2)
+        brand_row = tk.Frame(brand_frame, bg=COLORS["bg_sidebar"])
+        brand_row.pack(anchor="w")
 
-        # ---- Device toolbar ----
-        toolbar = ttk.Frame(self.root)
-        toolbar.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 0))
+        tk.Label(
+            brand_row, text="🛰️", font=("Segoe UI", 14), bg=COLORS["bg_sidebar"]
+        ).pack(side="left", padx=(0, 6))
 
-        ttk.Button(toolbar, text="＋ Add Device", command=self._add_device, width=14).pack(side="left", padx=(0, 4))
-        ttk.Button(toolbar, text="▶▶ Start All",  command=self._start_all,  width=14).pack(side="left", padx=4)
-        ttk.Button(toolbar, text="■■ Stop All",   command=self._stop_all,   width=14).pack(side="left", padx=4)
+        tk.Label(
+            brand_row, text=self.APP_TITLE, font=FONTS["brand_title"],
+            fg=COLORS["text_primary"], bg=COLORS["bg_sidebar"]
+        ).pack(side="left")
 
-        # ---- Device notebook ----
-        self._notebook = ttk.Notebook(self.root)
-        self._notebook.grid(row=2, column=0, sticky="nsew", padx=8, pady=4)
+        tk.Label(
+            brand_frame, text=f"Multi-Profile Simulator • {self.APP_VERSION}",
+            font=FONTS["caption"], fg=COLORS["text_secondary"], bg=COLORS["bg_sidebar"]
+        ).pack(anchor="w", padx=(26, 0), pady=(2, 0))
 
-        # ---- Master log ----
-        log_frame = ttk.LabelFrame(self.root, text="Master Log")
-        log_frame.grid(row=3, column=0, sticky="nsew", padx=8, pady=(0, 4))
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
+        # Devices Section Header with "＋ Add" Button
+        dev_header = tk.Frame(self._sidebar, bg=COLORS["bg_sidebar"])
+        dev_header.pack(fill="x", padx=14, pady=(6, 6))
 
-        self._master_log = tk.Text(log_frame, height=7, wrap="none",
-                                   font=("Consolas", 8), state="disabled",
-                                   bg="#111111", fg="#cccccc")
-        self._master_log.grid(row=0, column=0, sticky="nsew")
+        tk.Label(
+            dev_header, text="DEVICES", font=FONTS["section_h"],
+            fg=COLORS["text_muted"], bg=COLORS["bg_sidebar"]
+        ).pack(side="left")
 
-        vsb = ttk.Scrollbar(log_frame, orient="vertical", command=self._master_log.yview)
-        vsb.grid(row=0, column=1, sticky="ns")
-        self._master_log["yscrollcommand"] = vsb.set
+        add_btn = tk.Button(
+            dev_header, text="＋ Add", font=FONTS["caption"],
+            bg=COLORS["bg_card"], fg=COLORS["text_accent"],
+            activebackground=COLORS["info"], activeforeground="#ffffff",
+            relief="flat", bd=0, padx=8, pady=2, cursor="hand2",
+            command=self._add_device
+        )
+        add_btn.pack(side="right")
 
-        log_btn_frame = ttk.Frame(log_frame)
-        log_btn_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 2))
-        ttk.Button(log_btn_frame, text="Clear",      command=self._clear_master_log, width=8).pack(side="left", padx=4)
-        ttk.Button(log_btn_frame, text="Export Log", command=self._export_log,       width=10).pack(side="left", padx=4)
+        # Scrollable Device Tiles Container
+        self._tiles_canvas = tk.Canvas(
+            self._sidebar, bg=COLORS["bg_sidebar"], highlightthickness=0, bd=0
+        )
+        self._tiles_canvas.pack(fill="both", expand=True, padx=8, pady=2)
 
-        # Status bar
-        self._status_bar = ttk.Label(self.root, text="Ready", relief="sunken", anchor="w")
-        self._status_bar.grid(row=4, column=0, sticky="ew", padx=0)
+        self._tiles_frame = tk.Frame(self._tiles_canvas, bg=COLORS["bg_sidebar"])
+        self._tiles_canvas.create_window((0, 0), window=self._tiles_frame, anchor="nw", width=214)
+
+        self._tiles_frame.bind(
+            "<Configure>",
+            lambda e: self._tiles_canvas.configure(scrollregion=self._tiles_canvas.bbox("all"))
+        )
+
+        # Sidebar Footer: Debug Mode Toggle & Hotkey hint
+        footer_frame = tk.Frame(
+            self._sidebar, bg=COLORS["bg_sidebar"],
+            highlightbackground=COLORS["border"], highlightthickness=1, padx=12, pady=10
+        )
+        footer_frame.pack(fill="x", side="bottom")
+
+        debug_row = tk.Frame(footer_frame, bg=COLORS["bg_sidebar"])
+        debug_row.pack(fill="x")
+
+        tk.Label(
+            debug_row, text="⚙️ Debug Mode", font=FONTS["body_bold"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_sidebar"]
+        ).pack(side="left")
+
+        self._debug_btn = tk.Button(
+            debug_row, text="OFF", font=FONTS["badge"],
+            bg=COLORS["bg_card"], fg=COLORS["text_muted"],
+            activebackground=COLORS["warning"], activeforeground="#000000",
+            relief="flat", bd=0, padx=8, pady=2, cursor="hand2",
+            command=self._toggle_debug_mode
+        )
+        self._debug_btn.pack(side="right")
+
+        tk.Label(
+            footer_frame, text="Shortcut: F12 or Ctrl+D", font=("Segoe UI", 7),
+            fg=COLORS["text_muted"], bg=COLORS["bg_sidebar"]
+        ).pack(anchor="w", pady=(4, 0))
+
+        # ---------------- Right Main Viewport ---------------- #
+        self._main_viewport = tk.Frame(self.root, bg=COLORS["bg_app"])
+        self._main_viewport.grid(row=0, column=1, sticky="nsew")
+
+    def _setup_shortcuts(self) -> None:
+        self.root.bind("<F12>", lambda e: self._toggle_debug_mode())
+        self.root.bind("<Control-d>", lambda e: self._toggle_debug_mode())
+        self.root.bind("<Control-D>", lambda e: self._toggle_debug_mode())
 
     # ------------------------------------------------------------------ #
-    #  Device management                                                   #
+    #  Device Management & Sidebar Synchronization                       #
     # ------------------------------------------------------------------ #
 
     def _add_device(self) -> None:
@@ -125,67 +172,186 @@ class SimulatorApp:
         self._next_id += 1
 
         tab = DeviceTab(
-            self._notebook,
+            self._main_viewport,
             device_num=dev_id,
             on_start=lambda cfg, did=dev_id: self._start_device(did, cfg),
             on_stop=lambda did=dev_id: self._stop_device(did),
             on_remove=lambda did=dev_id: self._remove_device(did),
             on_sos=lambda did, cfg, mode: self._handle_sos(did, cfg, mode),
             on_push_single=lambda did, cfg, ptype: self._handle_push_single(did, cfg, ptype),
+            on_profile_change_cb=lambda did, prof: self._update_tile_profile(did, prof),
         )
-        self._notebook.add(tab, text=f"  Device {dev_id}  ")
-        self._notebook.select(tab)
-        self._devices[dev_id] = (tab, None)
-        self._master_log_write(f"[SYS] Device {dev_id} added.")
+        tab.set_debug_mode(self._debug_mode)
+
+        # Create tile in sidebar
+        tile = self._create_device_tile(dev_id, tab.get_profile())
+
+        self._devices[dev_id] = {
+            "tab": tab,
+            "client": None,
+            "tile": tile,
+        }
+
+        # Select this newly added device
+        self._select_device(dev_id)
+
+    def _create_device_tile(self, dev_id: int, profile: str) -> dict:
+        tile_frame = tk.Frame(
+            self._tiles_frame, bg=COLORS["bg_sidebar"],
+            highlightbackground=COLORS["border"], highlightthickness=1,
+            cursor="hand2", padx=10, pady=8
+        )
+        tile_frame.pack(fill="x", pady=3)
+
+        # Row 1: status dot + Device Name + profile pill
+        row1 = tk.Frame(tile_frame, bg=COLORS["bg_sidebar"])
+        row1.pack(fill="x")
+
+        status_dot = tk.Label(
+            row1, text="●", font=("Segoe UI", 10),
+            fg=COLORS["stopped"], bg=COLORS["bg_sidebar"]
+        )
+        status_dot.pack(side="left", padx=(0, 6))
+
+        title_lbl = tk.Label(
+            row1, text=f"Device {dev_id}", font=FONTS["device_name"],
+            fg=COLORS["text_primary"], bg=COLORS["bg_sidebar"]
+        )
+        title_lbl.pack(side="left")
+
+        fg_badge, bg_badge = PROFILE_BADGE_COLORS.get(profile, ("#ffffff", COLORS["bg_card"]))
+        badge_lbl = tk.Label(
+            row1, text=profile, font=FONTS["badge"],
+            fg=fg_badge, bg=bg_badge, padx=5, pady=1
+        )
+        badge_lbl.pack(side="right")
+
+        # Row 2: packet count pill
+        row2 = tk.Frame(tile_frame, bg=COLORS["bg_sidebar"])
+        row2.pack(fill="x", pady=(4, 0))
+
+        count_lbl = tk.Label(
+            row2, text="0 pkts", font=FONTS["caption"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_sidebar"]
+        )
+        count_lbl.pack(side="left", padx=(16, 0))
+
+        tile_dict = {
+            "frame":      tile_frame,
+            "status_dot": status_dot,
+            "title_lbl":  title_lbl,
+            "badge_lbl":  badge_lbl,
+            "count_lbl":  count_lbl,
+            "row1":       row1,
+            "row2":       row2,
+        }
+
+        # Bind clicks to select
+        for widget in (tile_frame, status_dot, title_lbl, badge_lbl, count_lbl, row1, row2):
+            widget.bind("<Button-1>", lambda e, did=dev_id: self._select_device(did))
+
+        return tile_dict
+
+    def _select_device(self, dev_id: int) -> None:
+        if dev_id not in self._devices:
+            return
+
+        # Deselect old
+        if self._selected_id and self._selected_id in self._devices:
+            old_tile = self._devices[self._selected_id]["tile"]
+            self._set_tile_selected(old_tile, False)
+            self._devices[self._selected_id]["tab"].pack_forget()
+
+        # Select new
+        self._selected_id = dev_id
+        new_entry = self._devices[dev_id]
+        self._set_tile_selected(new_entry["tile"], True)
+        new_entry["tab"].pack(fill="both", expand=True)
+
+    def _set_tile_selected(self, tile: dict, is_sel: bool) -> None:
+        bg = COLORS["bg_card_hover"] if is_sel else COLORS["bg_sidebar"]
+        border = COLORS["info"] if is_sel else COLORS["border"]
+        tile["frame"].config(bg=bg, highlightbackground=border)
+        tile["row1"].config(bg=bg)
+        tile["row2"].config(bg=bg)
+        tile["status_dot"].config(bg=bg)
+        tile["title_lbl"].config(bg=bg, fg=COLORS["text_primary"] if is_sel else COLORS["text_secondary"])
+        tile["count_lbl"].config(bg=bg)
+
+    def _update_tile_profile(self, dev_id: int, profile: str) -> None:
+        if dev_id in self._devices:
+            badge = self._devices[dev_id]["tile"]["badge_lbl"]
+            fg_badge, bg_badge = PROFILE_BADGE_COLORS.get(profile, ("#ffffff", COLORS["bg_card"]))
+            badge.config(text=profile, fg=fg_badge, bg=bg_badge)
+
+    def _update_tile_state(self, dev_id: int, status: str, count: int) -> None:
+        if dev_id not in self._devices:
+            return
+        tile = self._devices[dev_id]["tile"]
+        tile["count_lbl"].config(text=f"{count} pkts")
+
+        if status == "Sending":
+            tile["status_dot"].config(fg=COLORS["success"])
+        elif status in ("Connecting", "Connected"):
+            tile["status_dot"].config(fg=COLORS["warning"])
+        else:
+            tile["status_dot"].config(fg=COLORS["stopped"])
 
     def _remove_device(self, dev_id: int) -> None:
         if dev_id not in self._devices:
             return
-        tab, client = self._devices[dev_id]
-        if client:
-            client.stop()
-        for idx in range(self._notebook.index("end")):
-            if self._notebook.nametowidget(self._notebook.tabs()[idx]) is tab:
-                self._notebook.forget(idx)
-                break
+        if len(self._devices) <= 1:
+            messagebox.showinfo("Action Denied", "At least one device must remain active.")
+            return
+
+        entry = self._devices[dev_id]
+        if entry["client"]:
+            entry["client"].stop()
+
+        entry["tab"].pack_forget()
+        entry["tab"].destroy()
+        entry["tile"]["frame"].destroy()
+
         del self._devices[dev_id]
-        self._master_log_write(f"[SYS] Device {dev_id} removed.")
+
+        # Select next available device
+        remaining_ids = list(self._devices.keys())
+        if remaining_ids:
+            self._select_device(remaining_ids[0])
+
+    # ------------------------------------------------------------------ #
+    #  Debug Mode Switch                                                 #
+    # ------------------------------------------------------------------ #
+
+    def _toggle_debug_mode(self) -> None:
+        self._debug_mode = not self._debug_mode
+        if self._debug_mode:
+            self._debug_btn.config(text="ON", bg=COLORS["warning"], fg="#000000")
+        else:
+            self._debug_btn.config(text="OFF", bg=COLORS["bg_card"], fg=COLORS["text_muted"])
+
+        # Update all device tabs
+        for entry in self._devices.values():
+            entry["tab"].set_debug_mode(self._debug_mode)
+
+    # ------------------------------------------------------------------ #
+    #  Device Execution Engine                                           #
+    # ------------------------------------------------------------------ #
 
     def _start_device(self, dev_id: int, cfg: dict) -> None:
         if dev_id not in self._devices:
             return
 
-        profile = cfg.get("profile", "CGM")
-
-        # Resolve server host/port for this profile
-        srv = PROFILE_SERVER.get(profile, PROFILE_SERVER["CGM"])
+        profile = cfg.get("profile", "VLTD")
+        srv = PROFILE_SERVER.get(profile, PROFILE_SERVER["VLTD"])
         host = srv["host"]
         port = srv["port"]
+        emergency_port = srv.get("emergency_port")
+        builder = PACKET_BUILDERS.get(profile, build_vltd_packet)
 
-        if not host:
-            messagebox.showwarning("Not Implemented", f"{profile} server not configured.")
-            tab, _ = self._devices[dev_id]
-            tab.set_status("Stopped", 0)
-            return
-
-        # Resolve packet builder
-        builder = PACKET_BUILDERS.get(profile)
-        if builder is None:
-            messagebox.showwarning("Not Implemented", f"{profile} packet builder not configured.")
-            tab, _ = self._devices[dev_id]
-            tab.set_status("Stopped", 0)
-            return
-
-        # For CGM, inject HMAC key from the UI field
-        if profile == "CGM":
-            try:
-                cfg["hmac_key"] = self._hmac_var.get().strip().encode("ascii")
-            except Exception:
-                cfg["hmac_key"] = CGM_HMAC_BYTES
-
-        tab, old_client = self._devices[dev_id]
-        if old_client:
-            old_client.stop()
+        entry = self._devices[dev_id]
+        if entry["client"]:
+            entry["client"].stop()
 
         client = DeviceClient(
             host=host,
@@ -195,154 +361,75 @@ class SimulatorApp:
             on_log=lambda msg, did=dev_id: self._device_log(did, msg),
             on_status=lambda status, count, did=dev_id: self._device_status(did, status, count),
             connect_timeout=srv.get("connect_timeout", 10),
-            retry_delay=srv.get("retry_delay", 5),
-            emergency_port=srv.get("emergency_port"),
+            retry_delay=srv.get("retry_delay", 2),
+            emergency_port=emergency_port,
         )
-        self._devices[dev_id] = (tab, client)
+        entry["client"] = client
         client.start()
 
-        # Update tab title with profile + IMEI suffix
-        imei_suffix = cfg.get("imei", "?")[-6:]
-        label = f"  [{profile}] Dev {dev_id} …{imei_suffix}  "
-        for idx in range(self._notebook.index("end")):
-            if self._notebook.nametowidget(self._notebook.tabs()[idx]) is tab:
-                self._notebook.tab(idx, text=label)
-                break
-
-        srv_desc = f"{host}:{port} (Emerg: {srv.get('emergency_port')})" if srv.get("emergency_port") else f"{host}:{port}"
-        self._master_log_write(
-            f"[SYS] Device {dev_id} started  profile={profile}  "
-            f"IMEI={cfg.get('imei')}  server={srv_desc}"
-        )
+    def _stop_device(self, dev_id: int) -> None:
+        if dev_id not in self._devices:
+            return
+        entry = self._devices[dev_id]
+        if entry["client"]:
+            entry["client"].stop()
 
     def _handle_sos(self, dev_id: int, cfg: dict, mode: str) -> None:
-        """Triggered when user clicks SOS ON (EMR) or SOS OFF (SEM) on a VLTD device."""
         if dev_id not in self._devices:
             return
-        tab, client = self._devices[dev_id]
-        if not client:
-            return
-
-        # Update emergency mode in client
-        client.set_emergency(mode if mode == "EMR" else None)
-
-        ptype = "EMR" if mode == "EMR" else "SEM"
-        sent = client.send_packet_type(ptype)
-        if sent:
-            lbl = "SOS ON (EMR)" if mode == "EMR" else "SOS OFF (SEM)"
-            self._master_log_write(f"[Dev{dev_id}] Dispatched {lbl} -> :{client.emergency_port or 9032}")
+        client = self._devices[dev_id]["client"]
+        if client:
+            client.set_emergency(mode if mode == "EMR" else None)
+            ptype = "EMR" if mode == "EMR" else "SEM"
+            client.send_packet_type(ptype)
 
     def _handle_push_single(self, dev_id: int, cfg: dict, ptype: str) -> None:
-        """Triggered when user clicks one of the manual packet push buttons."""
         if dev_id not in self._devices:
             return
-        tab, client = self._devices[dev_id]
+        entry = self._devices[dev_id]
+        client = entry["client"]
 
         profile = cfg.get("profile", "VLTD")
         srv = PROFILE_SERVER.get(profile, PROFILE_SERVER["VLTD"])
-        host = srv["host"]
-        port = srv["port"]
-        emergency_port = srv.get("emergency_port")
         builder = PACKET_BUILDERS.get(profile, build_vltd_packet)
 
         if client is None:
             client = DeviceClient(
-                host=host,
-                port=port,
+                host=srv["host"],
+                port=srv["port"],
                 device_config=cfg,
                 packet_builder=builder,
                 on_log=lambda msg, did=dev_id: self._device_log(did, msg),
                 on_status=lambda status, count, did=dev_id: self._device_status(did, status, count),
                 connect_timeout=srv.get("connect_timeout", 10),
                 retry_delay=srv.get("retry_delay", 2),
-                emergency_port=emergency_port,
+                emergency_port=srv.get("emergency_port"),
             )
-            self._devices[dev_id] = (tab, client)
+            entry["client"] = client
         else:
             client.update_config(cfg)
 
-        success = client.send_packet_type(ptype)
-        if success:
-            self._master_log_write(f"[Dev{dev_id}] Pushed manual packet: {ptype}")
-
-    def _stop_device(self, dev_id: int) -> None:
-        if dev_id not in self._devices:
-            return
-        _, client = self._devices[dev_id]
-        if client:
-            client.stop()
-        self._master_log_write(f"[SYS] Device {dev_id} stopped.")
-
-    def _start_all(self) -> None:
-        for dev_id, (tab, _) in list(self._devices.items()):
-            tab._on_start_click()
-
-    def _stop_all(self) -> None:
-        for dev_id in list(self._devices.keys()):
-            self._stop_device(dev_id)
-            entry = self._devices.get(dev_id)
-            if entry:
-                tab, _ = entry
-                tab.set_status("Stopped", 0)
+        client.send_packet_type(ptype)
 
     # ------------------------------------------------------------------ #
-    #  Callbacks from DeviceClient (worker thread -> GUI thread via after)#
+    #  Client Callbacks (Worker thread -> UI thread via root.after)      #
     # ------------------------------------------------------------------ #
 
     def _device_log(self, dev_id: int, msg: str) -> None:
         def _update():
             if dev_id in self._devices:
-                tab, _ = self._devices[dev_id]
-                tab.append_log(msg)
-            self._master_log_write(f"[Dev{dev_id}] {msg}")
+                self._devices[dev_id]["tab"].append_log(msg)
         self.root.after(0, _update)
 
     def _device_status(self, dev_id: int, status: str, count: int) -> None:
         def _update():
             if dev_id in self._devices:
-                tab, _ = self._devices[dev_id]
-                tab.set_status(status, count)
-            self._status_bar.config(text=f"Device {dev_id}: {status}  |  Packets: {count}")
+                self._devices[dev_id]["tab"].set_status(status, count)
+                self._update_tile_state(dev_id, status, count)
         self.root.after(0, _update)
-
-    # ------------------------------------------------------------------ #
-    #  Master log helpers                                                  #
-    # ------------------------------------------------------------------ #
-
-    def _master_log_write(self, msg: str) -> None:
-        def _update():
-            ts = datetime.datetime.now().strftime("%H:%M:%S")
-            self._master_log.config(state="normal")
-            self._master_log.insert("end", f"[{ts}] {msg}\n")
-            self._master_log.see("end")
-            self._master_log.config(state="disabled")
-        self.root.after(0, _update)
-
-    def _clear_master_log(self) -> None:
-        self._master_log.config(state="normal")
-        self._master_log.delete("1.0", "end")
-        self._master_log.config(state="disabled")
-
-    def _export_log(self) -> None:
-        path = filedialog.asksaveasfilename(
-            defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-            initialfile=f"ais140_log_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-        )
-        if path:
-            content = self._master_log.get("1.0", "end")
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
-            messagebox.showinfo("Exported", f"Log saved to:\n{path}")
-
-    # ------------------------------------------------------------------ #
-    #  Misc                                                                #
-    # ------------------------------------------------------------------ #
-
-    def _toggle_key_visibility(self) -> None:
-        self._show_key = not self._show_key
-        self._hmac_entry.config(show="" if self._show_key else "*")
 
     def _on_close(self) -> None:
-        self._stop_all()
+        for entry in self._devices.values():
+            if entry["client"]:
+                entry["client"].stop()
         self.root.destroy()
