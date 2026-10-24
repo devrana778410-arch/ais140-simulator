@@ -295,14 +295,6 @@ class DeviceClient:
                         self.on_log(f"Send notice ({exc}) - auto-reconnecting next interval")
                         self._close_socket()
 
-                        self._sock.sendall(packet.encode("utf-8"))
-                        self.packet_count += 1
-                        preview = packet[:80] + "..." if len(packet) > 80 else packet
-                        self.on_log(f"TX [{lbl}]: {preview}")
-                        self.on_status("Sending", self.packet_count)
-                    except Exception as exc:
-                        self.on_log(f"Send notice ({exc}) - auto-reconnecting next interval")
-                        self._close_socket()
 
             interval = max(1, int(self.config.get("interval", 10)))
             if not self._interruptible_sleep(interval):
