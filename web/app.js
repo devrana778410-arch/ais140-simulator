@@ -31,6 +31,9 @@ const serverBanner = document.getElementById("server-banner");
 
 // Init
 window.addEventListener("DOMContentLoaded", () => {
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
   setupSSE();
   setupProfileTabs();
   setupAutocomplete();

@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: ais140-simulator
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: ""
+    startCommand: "python web/server.py $PORT"
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 10000

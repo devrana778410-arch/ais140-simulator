@@ -20,6 +20,8 @@ from src.gpcb_packet import build_packet as build_gpcb_packet
 from src.vltd_packet import build_packet as build_vltd_packet
 from src.client import DeviceClient
 
+START_TIME = time.time()
+
 PACKET_BUILDERS = {
     "VLTD": build_vltd_packet,
     "CGM":  build_cgm_packet,
@@ -191,6 +193,14 @@ class AIS140WebHandler(SimpleHTTPRequestHandler):
                 BRIDGE.unsubscribe(on_msg)
             return
 
+        elif path == "/api/health":
+            self._send_json({
+                "status": "healthy",
+                "service": "ais140-simulator",
+                "uptime_seconds": round(time.time() - START_TIME, 1)
+            })
+            return
+
         elif path == "/api/rto_search":
             qs = urllib.parse.parse_qs(parsed.query)
             query = qs.get("q", [""])[0]
@@ -281,5 +291,5 @@ def run(port=8080):
         server.server_close()
 
 if __name__ == "__main__":
-    p = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+    p = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", 8080))
     run(p)
