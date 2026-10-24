@@ -283,10 +283,10 @@ input:focus {
   background: #1e293b;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  max-height: 220px;
+  max-height: 240px;
   overflow-y: auto;
-  z-index: 100;
-  box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
+  z-index: 999999;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.7);
 }
 
 .autocomplete-item {
@@ -296,9 +296,14 @@ input:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  transition: background 0.15s;
 }
 .autocomplete-item:hover, .autocomplete-item.selected {
-  background: #334155;
+  background: #2563eb;
+  color: #ffffff;
+}
+.autocomplete-item:hover .autocomplete-coords, .autocomplete-item.selected .autocomplete-coords {
+  color: #e0f2fe;
 }
 
 .autocomplete-coords {

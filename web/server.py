@@ -14,7 +14,7 @@ WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
 from src.geo_link import extract_coordinates, find_nearest_rto
-from src.rto_data import RTO_TABLE, search_rto
+from src.rto_data import RTO_TABLE, search_rto, code_from_display
 from src.packet import build_packet as build_cgm_packet
 from src.gpcb_packet import build_packet as build_gpcb_packet
 from src.vltd_packet import build_packet as build_vltd_packet
@@ -204,8 +204,19 @@ class AIS140WebHandler(SimpleHTTPRequestHandler):
         elif path == "/api/rto_search":
             qs = urllib.parse.parse_qs(parsed.query)
             query = qs.get("q", [""])[0]
-            matches = search_rto(query)
-            self._send_json({"matches": matches})
+            display_matches = search_rto(query)
+            results = []
+            for item_str in display_matches[:12]:
+                code = code_from_display(item_str)
+                if code in RTO_TABLE:
+                    info = RTO_TABLE[code]
+                    results.append({
+                        "code": code,
+                        "name": info["name"],
+                        "lat": info["lat"],
+                        "lon": info["lon"]
+                    })
+            self._send_json({"matches": results})
             return
 
         elif path == "/api/extract_location":

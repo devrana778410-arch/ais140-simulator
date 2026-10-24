@@ -158,21 +158,71 @@ async function extractLocation(urlOrText) {
 
 // 4. Google-style Instant Autocomplete Search
 function setupAutocomplete() {
-  rtoSearchInput.addEventListener("input", async (e) => {
-    const query = e.target.value.trim();
-    if (!query) {
-      rtoDropdown.classList.add("hidden");
-      return;
+  let activeIndex = -1;
+
+  async function triggerSearch(queryText) {
+    const raw = (queryText !== undefined ? queryText : rtoSearchInput.value).trim();
+    let query = raw;
+    if (raw.includes(" – ")) {
+      query = raw.split(" – ")[1].trim();
     }
-    const res = await fetch(`/api/rto_search?q=${encodeURIComponent(query)}`);
-    const data = await res.json();
-    renderDropdown(data.matches || []);
+    try {
+      const res = await fetch(`/api/rto_search?q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      activeIndex = -1;
+      renderDropdown(data.matches || []);
+    } catch (err) {
+      console.error("RTO search failed", err);
+    }
+  }
+
+  rtoSearchInput.addEventListener("input", () => triggerSearch());
+
+  rtoSearchInput.addEventListener("focus", () => {
+    rtoSearchInput.select();
+    triggerSearch("");
+  });
+
+  rtoSearchInput.addEventListener("click", () => {
+    if (rtoDropdown.classList.contains("hidden")) {
+      triggerSearch();
+    }
   });
 
   rtoClearBtn.addEventListener("click", () => {
     rtoSearchInput.value = "";
-    rtoDropdown.classList.add("hidden");
     rtoSearchInput.focus();
+    triggerSearch("");
+  });
+
+  rtoSearchInput.addEventListener("keydown", (e) => {
+    const items = rtoDropdown.querySelectorAll(".autocomplete-item");
+    if (rtoDropdown.classList.contains("hidden") || items.length === 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        triggerSearch("");
+      }
+      return;
+    }
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      activeIndex = (activeIndex + 1) % items.length;
+      updateActiveHighlight(items, activeIndex);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      activeIndex = (activeIndex - 1 + items.length) % items.length;
+      updateActiveHighlight(items, activeIndex);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeIndex >= 0 && activeIndex < items.length) {
+        items[activeIndex].click();
+      } else if (items.length > 0) {
+        items[0].click();
+      }
+    } else if (e.key === "Escape") {
+      rtoDropdown.classList.add("hidden");
+    }
   });
 
   document.addEventListener("click", (e) => {
@@ -182,26 +232,55 @@ function setupAutocomplete() {
   });
 }
 
+function updateActiveHighlight(items, index) {
+  items.forEach((it, i) => {
+    if (i === index) {
+      it.classList.add("selected");
+      it.scrollIntoView({ block: "nearest" });
+    } else {
+      it.classList.remove("selected");
+    }
+  });
+}
+
 function renderDropdown(matches) {
   rtoDropdown.innerHTML = "";
-  if (matches.length === 0) {
+  if (!matches || matches.length === 0) {
     rtoDropdown.classList.add("hidden");
     return;
   }
 
   matches.forEach(item => {
+    let code, name, lat, lon;
+    if (typeof item === "object" && item.code) {
+      code = item.code;
+      name = item.name;
+      lat = parseFloat(item.lat);
+      lon = parseFloat(item.lon);
+    } else {
+      const parts = String(item).split(" – ");
+      code = parts[0] ? parts[0].trim() : "GJ-01";
+      name = parts[1] ? parts[1].trim() : "";
+      const dbEntry = (rtoDatabase && rtoDatabase[code]) || {};
+      lat = dbEntry.lat || 21.7051;
+      lon = dbEntry.lon || 72.9959;
+    }
+
+    const latStr = (!isNaN(lat) && lat !== 0) ? lat.toFixed(4) : "21.7051";
+    const lonStr = (!isNaN(lon) && lon !== 0) ? lon.toFixed(4) : "72.9959";
+
     const div = document.createElement("div");
     div.className = "autocomplete-item";
     div.innerHTML = `
-      <span>${item.code} – <strong>${item.name}</strong></span>
-      <span class="autocomplete-coords">${item.lat.toFixed(4)}°N, ${item.lon.toFixed(4)}°E</span>
+      <span>${code} – <strong>${name}</strong></span>
+      <span class="autocomplete-coords">${latStr}°N, ${lonStr}°E</span>
     `;
     div.addEventListener("click", () => {
-      selectedRto = item;
-      rtoSearchInput.value = `${item.code} – ${item.name}`;
-      rtoTargetInfo.textContent = `GPS Target: ${item.lat.toFixed(6)}°N, ${item.lon.toFixed(6)}°E (${item.name})`;
-      document.getElementById("cfg-lat").value = item.lat.toFixed(6);
-      document.getElementById("cfg-lon").value = item.lon.toFixed(6);
+      selectedRto = { code, name, lat, lon };
+      rtoSearchInput.value = `${code} – ${name}`;
+      rtoTargetInfo.textContent = `GPS Target: ${parseFloat(latStr).toFixed(6)}°N, ${parseFloat(lonStr).toFixed(6)}°E (${name})`;
+      document.getElementById("cfg-lat").value = parseFloat(latStr).toFixed(6);
+      document.getElementById("cfg-lon").value = parseFloat(lonStr).toFixed(6);
       rtoDropdown.classList.add("hidden");
     });
     rtoDropdown.appendChild(div);
