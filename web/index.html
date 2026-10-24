@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AIS-140 Telematics Simulator & Gateway Bridge</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛰️</text></svg>">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-icon">🛰️</span>
+        <div>
+          <h1>AIS-140 SIMULATOR <span class="badge badge-sky">WEB v2.0</span></h1>
+          <p class="subtitle">Parivahan VLTD • CGM Mines • GPCB Gujarat Gateway</p>
+        </div>
+      </div>
+      <div class="header-status">
+        <div class="status-indicator">
+          <span id="global-status-dot" class="status-dot stopped"></span>
+          <span id="global-status-text" class="status-text">STOPPED</span>
+        </div>
+        <div class="header-counter">
+          <span class="counter-label">TRANSMITTED</span>
+          <span id="global-packet-count" class="counter-val">0</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Location Link Extractor Bar -->
+    <section class="card link-card">
+      <div class="card-header">
+        <label for="location-link-input" class="section-title">📍 Location Link Extractor (WhatsApp / Google Maps)</label>
+      </div>
+      <div class="link-input-group">
+        <input 
+          type="text" 
+          id="location-link-input" 
+          placeholder="Paste link: https://maps.google.com/maps?q=21.86664%2C73.1830466&z=17&hl=en or raw coords"
+          autocomplete="off"
+        >
+        <button id="btn-extract-link" class="btn btn-primary">⚡ Extract & Apply</button>
+      </div>
+      <p id="link-extract-status" class="hint-text">Supported: WhatsApp shared location links, Google Maps search/pin links, geo: URIs, or decimal coordinates.</p>
+    </section>
+
+    <!-- Main Simulator Grid -->
+    <main class="sim-grid">
+      <!-- Left Column: Controls & Configuration -->
+      <div class="config-col">
+        <!-- Profile Selection Tabs -->
+        <div class="profile-tabs">
+          <button class="profile-tab active" data-profile="VLTD">
+            <span class="pill-dot sky"></span> VLTD (Parivahan)
+          </button>
+          <button class="profile-tab" data-profile="GPCB">
+            <span class="pill-dot emerald"></span> GPCB (Gujarat)
+          </button>
+          <button class="profile-tab" data-profile="CGM">
+            <span class="pill-dot violet"></span> CGM (Mines)
+          </button>
+        </div>
+
+        <!-- Configuration Card -->
+        <div class="card config-card">
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="cfg-imei">IMEI Number</label>
+              <input type="text" id="cfg-imei" value="869833088601301" maxlength="15">
+            </div>
+            <div class="form-group flex-1" id="vreg-group">
+              <label for="cfg-vreg">Vehicle Registration</label>
+              <input type="text" id="cfg-vreg" value="GJ01AC0000" maxlength="12">
+            </div>
+          </div>
+
+          <!-- RTO Location Autocomplete (VLTD profile) -->
+          <div class="form-group" id="rto-group">
+            <label for="rto-search">RTO Location Search (Google-style recommendation)</label>
+            <div class="autocomplete-wrapper">
+              <input type="text" id="rto-search" placeholder="Type to search (e.g. 'bh' for Bharuch)..." value="GJ-16 – Bharuch" autocomplete="off">
+              <button id="rto-clear-btn" class="clear-btn" title="Clear">✕</button>
+              <div id="rto-dropdown" class="autocomplete-dropdown hidden"></div>
+            </div>
+            <div id="rto-target-info" class="target-badge">GPS Target: 21.705100°N, 72.995900°E (Bharuch)</div>
+          </div>
+
+          <!-- Lat & Lon Coordinates (CGM / GPCB manual inputs) -->
+          <div class="form-row" id="coords-row" style="display: none;">
+            <div class="form-group flex-1">
+              <label for="cfg-lat">Latitude (°N)</label>
+              <input type="number" id="cfg-lat" step="0.000001" value="21.749826">
+            </div>
+            <div class="form-group flex-1">
+              <label for="cfg-lon">Longitude (°E)</label>
+              <input type="number" id="cfg-lon" step="0.000001" value="73.098231">
+            </div>
+          </div>
+
+          <!-- Interval & Auto-Sequence -->
+          <div class="form-row align-center">
+            <div class="form-group width-sm">
+              <label for="cfg-interval">Interval (s)</label>
+              <input type="number" id="cfg-interval" min="1" max="3600" value="10">
+            </div>
+            <div class="form-group flex-1 checkbox-group" id="auto-sos-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="cfg-auto-sos" checked>
+                <span>Auto-push all 5 packets (LGN → HEL → PVT → EMR → SEM)</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Server Info Banner -->
+          <div class="server-banner" id="server-banner">
+            Target Server: commonlayer.parivahan.gov.in : 9031 (Emergency: :9032)
+          </div>
+        </div>
+
+        <!-- Simulation Action Buttons -->
+        <div class="card action-card">
+          <div class="action-buttons-row">
+            <button id="btn-start-stop" class="btn btn-success btn-large">
+              ▶ START SIMULATOR
+            </button>
+            <button id="btn-sos-on" class="btn btn-danger" disabled>
+              🚨 SOS ON (EMR)
+            </button>
+            <button id="btn-sos-off" class="btn btn-slate" disabled>
+              🛡️ SOS OFF (SEM)
+            </button>
+          </div>
+
+          <!-- Instant Single Push Buttons -->
+          <div class="single-push-section" id="single-push-section">
+            <span class="section-label">Manual Packet Push:</span>
+            <div class="push-btn-grid">
+              <button class="btn btn-outline" data-push="LGN">1. Login (LGN)</button>
+              <button class="btn btn-outline" data-push="HEL">2. Health (HEL)</button>
+              <button class="btn btn-outline" data-push="PVT">3. Position (PVT)</button>
+              <button class="btn btn-outline" data-push="EMR">4. Alert (EMR)</button>
+              <button class="btn btn-outline" data-push="SEM">5. Normal (SEM)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Live Terminal Socket Log -->
+      <div class="log-col">
+        <div class="card terminal-card">
+          <div class="terminal-header">
+            <div class="terminal-title">
+              <span class="terminal-dot green"></span>
+              <span class="terminal-dot yellow"></span>
+              <span class="terminal-dot red"></span>
+              <span class="terminal-name">Telemetry Socket Stream</span>
+            </div>
+            <div class="terminal-actions">
+              <button id="btn-clear-logs" class="btn btn-sm">Clear</button>
+              <button id="btn-export-logs" class="btn btn-sm">Export</button>
+            </div>
+          </div>
+          <div id="terminal-body" class="terminal-body">
+            <div class="log-entry system">[00:00:00] AIS-140 Telematics Gateway Bridge Ready.</div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

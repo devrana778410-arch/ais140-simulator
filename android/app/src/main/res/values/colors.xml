@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand / Primary -->
+    <color name="colorPrimary">#1565C0</color>
+    <color name="colorPrimaryDark">#0D47A1</color>
+    <color name="colorPrimaryVariant">#1976D2</color>
+    <color name="colorOnPrimary">#FFFFFF</color>
+
+    <!-- Secondary -->
+    <color name="colorSecondary">#00897B</color>
+    <color name="colorSecondaryVariant">#00695C</color>
+    <color name="colorOnSecondary">#FFFFFF</color>
+
+    <!-- Background / Surface -->
+    <color name="colorBackground">#F5F5F5</color>
+    <color name="colorSurface">#FFFFFF</color>
+    <color name="colorOnBackground">#212121</color>
+    <color name="colorOnSurface">#212121</color>
+
+    <!-- Status -->
+    <color name="green_connected">#2E7D32</color>
+    <color name="orange_connecting">#E65100</color>
+    <color name="red_error">#C62828</color>
+    <color name="red_stop">#D32F2F</color>
+    <color name="grey_disconnected">#757575</color>
+
+    <!-- Log panel -->
+    <color name="log_background">#0D0D0D</color>
+    <color name="log_text">#E0E0E0</color>
+    <color name="log_success">#4CAF50</color>
+    <color name="log_error">#F44336</color>
+    <color name="log_warning">#FF9800</color>
+    <color name="log_info">#2196F3</color>
+
+    <!-- Code preview -->
+    <color name="code_background">#1E1E1E</color>
+    <color name="code_text">#D4D4D4</color>
+</resources>

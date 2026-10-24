@@ -68,3 +68,71 @@ def get_rto_display_list() -> list[str]:
 def code_from_display(display: str) -> str:
     """Extract RTO code from a display string like 'GJ-01 – Ahmedabad...'."""
     return display.split(" – ")[0].strip()
+
+
+def search_rto(query: str) -> list[str]:
+    """
+    Search RTO list matching code (e.g. '05', 'GJ-05', 'GJ05')
+    or district name (e.g. 'Surat', 'Bharuch', 'Ahmedabad').
+    Ranks prefix matches (e.g. 'bh' -> 'Bharuch', 'Bhavnagar', 'Bhuj') at the top!
+    """
+    q = query.strip().lower()
+    if not q:
+        # Default recommendations: major industrial/transport hubs
+        priority_codes = ["GJ-16", "GJ-01", "GJ-05", "GJ-06", "GJ-03", "GJ-12", "GJ-18"]
+        items = [f"{c} – {RTO_TABLE[c]['name']}" for c in priority_codes if c in RTO_TABLE]
+        items += [f"{c} – {d['name']}" for c, d in sorted(RTO_TABLE.items()) if c not in priority_codes]
+        return items
+
+    city_prefix = []
+    word_prefix = []
+    code_match = []
+    contains_match = []
+
+    for code, info in sorted(RTO_TABLE.items()):
+        name = info["name"]
+        nl = name.lower()
+        cl = code.lower()
+        item = f"{code} – {name}"
+
+        # Words in city name
+        words = nl.replace("(", " ").replace(")", " ").replace("-", " ").split()
+        if words and words[0].startswith(q):
+            # E.g. 'Bharuch', 'Bhavnagar', 'Bhuj' start with 'bh'
+            city_prefix.append(item)
+        elif any(w.startswith(q) for w in words[1:]):
+            word_prefix.append(item)
+        elif cl.startswith(q) or cl.replace("-", "").startswith(q) or cl.split("-")[-1].startswith(q):
+            code_match.append(item)
+        elif q in nl or q in cl:
+            contains_match.append(item)
+
+    ranked = city_prefix + word_prefix + code_match + contains_match
+    seen = set()
+    dedup = []
+    for x in ranked:
+        if x not in seen:
+            seen.add(x)
+            dedup.append(x)
+    return dedup
+
+
+def resolve_rto(query: str) -> tuple[str, float, float]:
+    """
+    Smart resolver: takes user input (full display label, RTO code, or city name)
+    and returns (code, lat, lon). Falls back to Ahmedabad if no match.
+    """
+    q = query.strip()
+    if not q:
+        return "GJ-01", RTO_TABLE["GJ-01"]["lat"], RTO_TABLE["GJ-01"]["lon"]
+
+    code = code_from_display(q).upper()
+    if code in RTO_TABLE:
+        return code, RTO_TABLE[code]["lat"], RTO_TABLE[code]["lon"]
+
+    matches = search_rto(q)
+    if matches:
+        first_code = code_from_display(matches[0])
+        return first_code, RTO_TABLE[first_code]["lat"], RTO_TABLE[first_code]["lon"]
+
+    return "GJ-01", RTO_TABLE["GJ-01"]["lat"], RTO_TABLE["GJ-01"]["lon"]

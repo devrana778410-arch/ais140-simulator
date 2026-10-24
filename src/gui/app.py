@@ -5,6 +5,7 @@ import datetime
 from .device_tab import DeviceTab, PROFILE_SERVER
 from .styles import COLORS, FONTS, apply_theme
 from ..client import DeviceClient
+from ..geo_link import extract_coordinates
 from ..packet import build_packet as build_cgm_packet
 from ..gpcb_packet import build_packet as build_gpcb_packet
 from ..vltd_packet import build_packet as build_vltd_packet
@@ -158,6 +159,45 @@ class SimulatorApp:
         self._main_viewport = tk.Frame(self.root, bg=COLORS["bg_app"])
         self._main_viewport.grid(row=0, column=1, sticky="nsew")
 
+        # ---------------- Top Bar: Location Link Extraction ---------------- #
+        link_card = tk.Frame(
+            self._main_viewport, bg=COLORS["bg_card"],
+            highlightbackground=COLORS["border"], highlightthickness=1,
+            padx=14, pady=10
+        )
+        link_card.pack(fill="x", padx=16, pady=(14, 6))
+        link_card.columnconfigure(1, weight=1)
+
+        tk.Label(
+            link_card, text="📍 Location Link:", font=FONTS["body_bold"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
+        ).grid(row=0, column=0, sticky="w", padx=(0, 10))
+
+        self._link_entry = tk.Entry(
+            link_card, font=FONTS["input"], bg=COLORS["bg_input"],
+            fg=COLORS["text_primary"], insertbackground=COLORS["text_primary"],
+            relief="flat", highlightbackground=COLORS["border"], highlightthickness=1
+        )
+        self._link_entry.grid(row=0, column=1, sticky="ew", padx=(0, 10))
+        self._link_entry.bind("<Return>", lambda e: self._on_extract_and_add())
+
+        extract_add_btn = tk.Button(
+            link_card, text="＋ Add Device", font=FONTS["btn_normal"],
+            bg=COLORS["info"], fg="#ffffff", activebackground="#2563eb",
+            activeforeground="#ffffff", relief="flat", bd=0, padx=12, pady=5,
+            cursor="hand2", command=self._on_extract_and_add
+        )
+        extract_add_btn.grid(row=0, column=2, padx=(0, 6))
+
+        extract_apply_btn = tk.Button(
+            link_card, text="⚡ Apply to Active", font=FONTS["caption"],
+            bg=COLORS["bg_sidebar"], fg=COLORS["text_accent"],
+            activebackground=COLORS["bg_card_hover"], activeforeground="#ffffff",
+            relief="flat", bd=0, padx=10, pady=5, cursor="hand2",
+            command=self._on_extract_and_apply
+        )
+        extract_apply_btn.grid(row=0, column=3)
+
     def _setup_shortcuts(self) -> None:
         self.root.bind("<F12>", lambda e: self._toggle_debug_mode())
         self.root.bind("<Control-d>", lambda e: self._toggle_debug_mode())
@@ -167,7 +207,7 @@ class SimulatorApp:
     #  Device Management & Sidebar Synchronization                       #
     # ------------------------------------------------------------------ #
 
-    def _add_device(self) -> None:
+    def _add_device(self) -> int:
         dev_id = self._next_id
         self._next_id += 1
 
@@ -194,6 +234,52 @@ class SimulatorApp:
 
         # Select this newly added device
         self._select_device(dev_id)
+        return dev_id
+
+    def _on_extract_and_add(self) -> None:
+        raw = self._link_entry.get().strip()
+        if not raw:
+            messagebox.showwarning("Empty Link", "Please enter or paste a WhatsApp/Google Maps location link.")
+            return
+        coords = extract_coordinates(raw)
+        if not coords:
+            messagebox.showerror(
+                "Invalid Location",
+                "Could not extract coordinates from link.\nExample format:\nhttps://maps.google.com/maps?q=21.86664%2C73.1830466"
+            )
+            return
+        lat, lon = coords
+        dev_id = self._add_device()
+        self._devices[dev_id]["tab"].apply_coordinates(lat, lon)
+        self._link_entry.delete(0, "end")
+
+    def _on_extract_and_apply(self) -> None:
+        raw = self._link_entry.get().strip()
+        if not raw:
+            messagebox.showwarning("Empty Link", "Please enter or paste a WhatsApp/Google Maps location link.")
+            return
+        coords = extract_coordinates(raw)
+        if not coords:
+            messagebox.showerror(
+                "Invalid Location",
+                "Could not extract coordinates from link.\nExample format:\nhttps://maps.google.com/maps?q=21.86664%2C73.1830466"
+            )
+            return
+        if self._selected_id and self._selected_id in self._devices:
+            lat, lon = coords
+            self._devices[self._selected_id]["tab"].apply_coordinates(lat, lon)
+            self._link_entry.delete(0, "end")
+
+    def open_location_link(self, raw_link: str) -> None:
+        """Handle location link passed via CLI or Windows 'Open with'."""
+        coords = extract_coordinates(raw_link)
+        if coords:
+            lat, lon = coords
+            if self._selected_id and self._selected_id in self._devices:
+                self._devices[self._selected_id]["tab"].apply_coordinates(lat, lon)
+            else:
+                dev_id = self._add_device()
+                self._devices[dev_id]["tab"].apply_coordinates(lat, lon)
 
     def _create_device_tile(self, dev_id: int, profile: str) -> dict:
         tile_frame = tk.Frame(

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AIS 140 Simulator</string>
+
+    <!-- Section headers -->
+    <string name="section_server">Server Connection</string>
+    <string name="section_device">Device Identity</string>
+    <string name="section_gps">GPS / Location</string>
+    <string name="section_network">Network Info</string>
+    <string name="section_transmit">Transmission</string>
+    <string name="section_preview">Packet Preview</string>
+    <string name="section_logs">Event Log</string>
+
+    <!-- Hints -->
+    <string name="hint_host">Server IP / Hostname</string>
+    <string name="hint_port">Port</string>
+    <string name="hint_imei">IMEI (15 digits)</string>
+    <string name="hint_vehicle_reg">Vehicle Registration</string>
+    <string name="hint_hmac_key">HMAC-SHA256 Key (optional)</string>
+    <string name="hint_lat">Latitude</string>
+    <string name="hint_lon">Longitude</string>
+    <string name="hint_alt">Altitude (m)</string>
+    <string name="hint_speed">Speed (km/h)</string>
+    <string name="hint_heading">Heading (°)</string>
+    <string name="hint_satellites">Satellites</string>
+    <string name="hint_operator">Operator</string>
+    <string name="hint_interval">Interval (seconds)</string>
+
+    <!-- Buttons -->
+    <string name="btn_connect">Connect &amp; Login</string>
+    <string name="btn_disconnect">Disconnect</string>
+    <string name="btn_send_now">Send Now</string>
+    <string name="btn_start_auto">Start Auto</string>
+    <string name="btn_stop">Stop</string>
+    <string name="btn_refresh">Refresh</string>
+    <string name="btn_clear">Clear</string>
+
+    <!-- Notification -->
+    <string name="notification_title">AIS 140 Simulator Running</string>
+    <string name="notification_channel_name">Simulator Status</string>
+</resources>

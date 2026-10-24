@@ -105,19 +105,19 @@ class DeviceClient:
 
         if ptype == "LGN":
             pkt = build_login_packet(**cfg)
-            lbl = "LGN (Login)"
+            lbl = "1/5 LGN (Login)"
         elif ptype == "HEL":
             pkt = build_health_packet(**cfg)
-            lbl = "HEL (Health)"
+            lbl = "2/5 HEL (Health)"
         elif ptype == "PVT":
             pkt = build_pvt_packet(**cfg)
-            lbl = "PVT (Position)"
+            lbl = "3/5 PVT (Position)"
         elif ptype == "EMR":
             pkt = build_emergency_packet(mode="EMR", **cfg)
-            lbl = "SOS ON (EMR)"
+            lbl = "4/5 SOS ON (EMR)"
         elif ptype == "SEM":
             pkt = build_emergency_packet(mode="SEM", **cfg)
-            lbl = "SOS OFF (SEM)"
+            lbl = "5/5 SOS OFF (SEM)"
         else:
             return False
 
@@ -248,11 +248,6 @@ class DeviceClient:
                 f"VLTD dual-port active: Primary={self.host}:{self.port} | "
                 f"Emergency={self.host}:{self.emergency_port or 9032}"
             )
-            time.sleep(0.3)
-            self.send_packet_type("LGN")
-            time.sleep(0.5)
-            self.send_packet_type("HEL")
-            time.sleep(0.5)
         else:
             # Initial connect for persistent socket profiles (CGM / GPCB)
             with self._lock:
@@ -270,42 +265,35 @@ class DeviceClient:
 
             cycle_count += 1
 
-            # Auto Emergency Sequence for VLTD (if enabled):
-            # At cycle 3: automatically triggers Emergency ON ($EPB,EMR) on port 9032
-            # Stays in EMR for 2 cycles
-            # At cycle 5: automatically triggers Emergency OFF ($EPB,SEM) on port 9032 and returns to normal
-            if is_vltd and self.auto_sos:
-                if cycle_count == 3:
-                    self.on_log(f"[AUTO] Triggering Emergency ON ($EPB,EMR) -> :{self.emergency_port or 9032}...")
-                    self.emergency_mode = "EMR"
-                elif cycle_count == 5:
-                    self.on_log(f"[AUTO] Triggering Emergency OFF ($EPB,SEM) -> :{self.emergency_port or 9032}...")
-                    self.send_packet_type("SEM")
-                    self.emergency_mode = None
-
-            # Send packet for this interval
-            cfg = self.config.copy()
-            cfg["seq_num"] = self.packet_count + 1
-
             if is_vltd:
-                if self.emergency_mode == "EMR":
-                    pkt = build_emergency_packet(mode="EMR", **cfg)
-                    lbl = f"{self.packet_count + 1:04d} EMR"
-                    self.send_instant(pkt, label=lbl, port=self.emergency_port or 9032)
-                else:
-                    pkt = self.packet_builder(**cfg)
-                    lbl = f"{self.packet_count + 1:04d}"
-                    self.send_instant(pkt, label=lbl, port=self.port)
+                # Automatically transmit all 5 VLTD packets in sequence
+                self.on_log(f"--- [Cycle #{cycle_count}] Pushing all 5 VLTD packets in sequence ---")
+                for ptype in ("LGN", "HEL", "PVT", "EMR", "SEM"):
+                    if not self._running:
+                        break
+                    self.send_packet_type(ptype)
+                    time.sleep(0.7)
             else:
                 # Persistent socket send for CGM / GPCB
                 with self._lock:
                     try:
+                        cfg = self.config.copy()
+                        cfg["seq_num"] = self.packet_count + 1
                         if self.emergency_mode == "EMR":
                             packet = build_emergency_packet(mode="EMR", **cfg)
                             lbl = f"{self.packet_count + 1:04d} EMR"
                         else:
                             packet = self.packet_builder(**cfg)
                             lbl = f"{self.packet_count + 1:04d}"
+
+                        self._sock.sendall(packet.encode("utf-8"))
+                        self.packet_count += 1
+                        preview = packet[:80] + "..." if len(packet) > 80 else packet
+                        self.on_log(f"TX [{lbl}]: {preview}")
+                        self.on_status("Sending", self.packet_count)
+                    except Exception as exc:
+                        self.on_log(f"Send notice ({exc}) - auto-reconnecting next interval")
+                        self._close_socket()
 
                         self._sock.sendall(packet.encode("utf-8"))
                         self.packet_count += 1

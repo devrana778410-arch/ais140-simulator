@@ -17,34 +17,42 @@ DEFAULT_VLTD_CELL_DATA = "20a8,6359,62b9,20a8,17,635a,20a8,15,6357,20a8,12,621a,
 def build_login_packet(
     imei: str,
     vreg: str = "GJ01AC0000",
-    lat: float = 22.3004010,
-    lon: float = 70.8046280,
-    fw: str = "4.0.28",
+    lat: float = 0.0,
+    lon: float = 0.0,
+    fw: str = "4.1.01",
     **_extra,
 ) -> str:
     """
     Build VLTD $LGN Login packet.
-    Format: $LGN,{VREG},{IMEI},{FW},AIS140,{LAT:.7f},{LON:.7f},*
+    Format: $LGN,{VREG},{IMEI},{FW},AIS140,{LAT},{LON},*
+    Example: $LGN,GJ01AC0000,869833088601301,4.1.01,AIS140,00.000000,00.000000,*
     """
-    return f"$LGN,{vreg},{imei},{fw},AIS140,{lat:.7f},{lon:.7f},*"
+    if lat == 0.0 and lon == 0.0:
+        lat_str = "00.000000"
+        lon_str = "00.000000"
+    else:
+        lat_str = f"{lat:09.6f}"
+        lon_str = f"{lon:09.6f}"
+    return f"$LGN,{vreg},{imei},{fw},AIS140,{lat_str},{lon_str},*"
 
 
 def build_health_packet(
     imei: str,
     vendor: str = "TRAXINA",
-    fw: str = "4.0.28",
-    batt_pct: int = 38,
+    fw: str = "4.1.01",
+    batt_pct: int = 100,
     low_batt: int = 20,
-    mem_alert: int = 0,
+    mem_alert: int = 8,
     ign_on_interval: int = 10,
-    ign_off_interval: int = 60,
+    ign_off_interval: int = 180,
     di_do: str = "0000",
-    seq: str = "11",
+    seq: str = "00",
     **_extra,
 ) -> str:
     """
     Build VLTD $HEL Health / Keepalive packet.
     Format: $HEL,{VENDOR},{FW},{IMEI},{BATT_PCT},{LOW_BATT},{MEM_ALERT},{IGN_ON_INT},{IGN_OFF_INT},{DI_DO},{SEQ}*
+    Example: $HEL,TRAXINA,4.1.01,869833088601301,100,20,8,10,180,0000,00*
     """
     return f"$HEL,{vendor},{fw},{imei},{batt_pct},{low_batt},{mem_alert},{ign_on_interval},{ign_off_interval},{di_do},{seq}*"
 
@@ -76,7 +84,7 @@ def build_pvt_packet(
     dout: str = "00",
     checksum: str = "D3",
     vendor: str = "TRAXINA",
-    fw: str = "4.0.27",
+    fw: str = "4.1.01",
     nw: str = "NR",
     fix: str = "L",
     **_extra,

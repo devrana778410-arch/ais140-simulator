@@ -9,4 +9,6 @@ import tkinter as tk
 if __name__ == "__main__":
     root = tk.Tk()
     app = SimulatorApp(root)
+    if len(sys.argv) > 1:
+        app.open_location_link(sys.argv[1])
     root.mainloop()

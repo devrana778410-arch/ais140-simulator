@@ -3,6 +3,17 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# PyInstaller build artifacts
+build/
+*.spec
+dist/AIS140-Simulator/
+
+# Android build artifacts
+.gradle/
+android/.gradle/
+android/app/build/
+android/local.properties
+
 # Logs
 *.log
 out.log

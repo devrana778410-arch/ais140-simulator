@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: ais140-simulator
+    env: python
+    buildCommand: ""
+    startCommand: "python web/server.py $PORT"
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 10000

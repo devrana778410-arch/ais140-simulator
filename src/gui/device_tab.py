@@ -3,8 +3,17 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import Callable, Optional
 import datetime
-from ..rto_data import get_rto_display_list, get_rto_coords, code_from_display
+from ..rto_data import (
+    get_rto_display_list,
+    get_rto_coords,
+    code_from_display,
+    search_rto,
+    resolve_rto,
+    RTO_TABLE,
+)
 from .styles import COLORS, FONTS
+from .autocomplete import AutocompleteRTO
+from ..geo_link import find_nearest_rto
 
 PROFILES = ["VLTD", "CGM", "GPCB"]
 
@@ -184,7 +193,7 @@ class DeviceTab(tk.Frame):
             fg=COLORS["text_primary"], insertbackground=COLORS["text_primary"],
             relief="flat", highlightbackground=COLORS["border"], highlightthickness=1
         )
-        self._imei.insert(0, "860560067225419")
+        self._imei.insert(0, "869833088601301")
         self._imei.grid(row=0, column=1, sticky="ew", padx=(12, 0), pady=6)
 
         # Field: Vehicle Registration (GPCB only)
@@ -210,28 +219,20 @@ class DeviceTab(tk.Frame):
         self._rto_container.grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=6)
         self._rto_container.columnconfigure(0, weight=1)
 
-        self._rto_var = tk.StringVar()
-        self._rto_cb = ttk.Combobox(
-            self._rto_container, textvariable=self._rto_var,
-            values=self._rto_list, state="readonly", font=FONTS["input"]
-        )
-        # Select GJ-16 Ankleshwar/Bharuch or default to first
-        sel_idx = 0
-        for i, opt in enumerate(self._rto_list):
-            if "GJ-16" in opt:
-                sel_idx = i
-                break
-        if self._rto_list:
-            self._rto_cb.set(self._rto_list[sel_idx])
-        self._rto_cb.grid(row=0, column=0, sticky="ew")
-        self._rto_cb.bind("<<ComboboxSelected>>", self._on_rto_change)
-
         self._rto_coord_lbl = tk.Label(
             self._rto_container, text="", font=FONTS["caption"],
             fg=COLORS["text_accent"], bg=COLORS["bg_card"]
         )
         self._rto_coord_lbl.grid(row=1, column=0, sticky="w", pady=(3, 0))
-        self._update_rto_preview()
+
+        self._rto_input = AutocompleteRTO(
+            self._rto_container,
+            on_select=self._on_rto_autocomplete_selected,
+            default_rto="GJ-16",
+        )
+        self._rto_input.grid(row=0, column=0, sticky="ew")
+        code, lat, lon = self._rto_input.get_rto()
+        self._rto_coord_lbl.config(text=f"GPS Target: {lat:.6f}°N, {lon:.6f}°E  ({RTO_TABLE[code]['name']})")
 
         # Fields: Manual Lat / Lon (CGM / GPCB)
         self._lat_lbl = tk.Label(
@@ -263,16 +264,15 @@ class DeviceTab(tk.Frame):
         tk.Label(self._lon_frame, text="°E", fg=COLORS["text_secondary"], bg=COLORS["bg_card"]).pack(side="left", padx=4)
 
         # Field: Interval
-        tk.Label(
+        self._interval_lbl = tk.Label(
             self._inputs_card, text="Interval (sec):", font=FONTS["body_bold"],
             fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
-        ).grid(row=3, column=0, sticky="w", pady=6)
+        )
 
-        interval_box = tk.Frame(self._inputs_card, bg=COLORS["bg_card"])
-        interval_box.grid(row=3, column=1, sticky="w", padx=(12, 0), pady=6)
+        self._interval_box = tk.Frame(self._inputs_card, bg=COLORS["bg_card"])
 
         self._interval = tk.Spinbox(
-            interval_box, from_=1, to=3600, width=6, font=FONTS["input"],
+            self._interval_box, from_=1, to=3600, width=6, font=FONTS["input"],
             bg=COLORS["bg_input"], fg=COLORS["text_primary"],
             insertbackground=COLORS["text_primary"], relief="flat",
             highlightbackground=COLORS["border"], highlightthickness=1
@@ -281,10 +281,10 @@ class DeviceTab(tk.Frame):
         self._interval.insert(0, "10")
         self._interval.pack(side="left")
 
-        # Field: Auto SOS cycle (VLTD only)
+        # Field: Auto Sequence / SOS cycle (VLTD only)
         self._auto_sos_var = tk.BooleanVar(value=True)
         self._auto_sos_cb = ttk.Checkbutton(
-            interval_box, text="Auto-test Emergency ON & OFF cycle during run",
+            self._interval_box, text="Auto-push all 5 packets (LGN → HEL → PVT → EMR → SEM) in sequence",
             variable=self._auto_sos_var, style="Card.TCheckbutton"
         )
         self._auto_sos_cb.pack(side="left", padx=(16, 0))
@@ -406,15 +406,10 @@ class DeviceTab(tk.Frame):
         if self._on_profile_change_cb:
             self._on_profile_change_cb(self._dev_num, profile)
 
-    def _on_rto_change(self, event=None) -> None:
-        self._update_rto_preview()
-
-    def _update_rto_preview(self) -> None:
-        rto_display = self._rto_var.get()
-        if rto_display:
-            code = code_from_display(rto_display)
-            lat, lon = get_rto_coords(code)
-            self._rto_coord_lbl.config(text=f"GPS Target: {lat:.6f}°N, {lon:.6f}°E")
+    def _on_rto_autocomplete_selected(self, code: str, lat: float, lon: float) -> None:
+        """Called automatically when an RTO recommendation is selected."""
+        name = RTO_TABLE.get(code, {}).get("name", "Unknown")
+        self._rto_coord_lbl.config(text=f"GPS Target: {lat:.6f}°N, {lon:.6f}°E  ({name})")
 
     def _apply_profile_visibility(self, profile: str) -> None:
         """Update field layouts based on active profile."""
@@ -428,26 +423,30 @@ class DeviceTab(tk.Frame):
         if profile == "VLTD":
             self._vreg_lbl.grid_remove()
             self._vreg.grid_remove()
-            self._rto_lbl.grid()
-            self._rto_container.grid()
             self._lat_lbl.grid_remove()
             self._lat_frame.grid_remove()
             self._lon_lbl.grid_remove()
             self._lon_frame.grid_remove()
+            self._rto_lbl.grid(row=1, column=0, sticky="w", pady=6)
+            self._rto_container.grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=6)
+            self._interval_lbl.grid(row=2, column=0, sticky="w", pady=6)
+            self._interval_box.grid(row=2, column=1, sticky="w", padx=(12, 0), pady=6)
             self._auto_sos_cb.pack(side="left", padx=(16, 0))
             self._emg_frame.pack(fill="x", padx=16, pady=(0, 12))
             self._hmac_frame.pack_forget()
             self._debug_btns_frame.pack(fill="x", pady=(4, 8))
 
         elif profile == "GPCB":
-            self._vreg_lbl.grid(row=1, column=0, sticky="w", pady=6)
-            self._vreg.grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=6)
             self._rto_lbl.grid_remove()
             self._rto_container.grid_remove()
+            self._vreg_lbl.grid(row=1, column=0, sticky="w", pady=6)
+            self._vreg.grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=6)
             self._lat_lbl.grid(row=2, column=0, sticky="w", pady=6)
             self._lat_frame.grid(row=2, column=1, sticky="w", padx=(12, 0), pady=6)
             self._lon_lbl.grid(row=3, column=0, sticky="w", pady=6)
             self._lon_frame.grid(row=3, column=1, sticky="w", padx=(12, 0), pady=6)
+            self._interval_lbl.grid(row=4, column=0, sticky="w", pady=6)
+            self._interval_box.grid(row=4, column=1, sticky="w", padx=(12, 0), pady=6)
             self._auto_sos_cb.pack_forget()
             self._emg_frame.pack_forget()
             self._hmac_frame.pack_forget()
@@ -462,6 +461,8 @@ class DeviceTab(tk.Frame):
             self._lat_frame.grid(row=1, column=1, sticky="w", padx=(12, 0), pady=6)
             self._lon_lbl.grid(row=2, column=0, sticky="w", pady=6)
             self._lon_frame.grid(row=2, column=1, sticky="w", padx=(12, 0), pady=6)
+            self._interval_lbl.grid(row=3, column=0, sticky="w", pady=6)
+            self._interval_box.grid(row=3, column=1, sticky="w", padx=(12, 0), pady=6)
             self._auto_sos_cb.pack_forget()
             self._emg_frame.pack_forget()
             self._hmac_frame.pack(anchor="w", pady=(0, 6))
@@ -540,12 +541,7 @@ class DeviceTab(tk.Frame):
             return None
 
         if profile == "VLTD":
-            rto_display = self._rto_var.get()
-            if not rto_display:
-                messagebox.showerror("Invalid Input", "Please select an RTO.")
-                return None
-            rto_code = code_from_display(rto_display)
-            lat, lon = get_rto_coords(rto_code)
+            rto_code, lat, lon = self._rto_input.get_rto()
             vreg = "GJ01AC0000"
         else:
             try:
@@ -588,7 +584,7 @@ class DeviceTab(tk.Frame):
             self._lat.config(state=state)
             self._lon.config(state=state)
         if profile == "VLTD":
-            self._rto_cb.config(state="disabled" if state == "disabled" else "readonly")
+            self._rto_input.config(state=state)
             self._auto_sos_cb.config(state=state)
 
     def get_profile(self) -> str:
@@ -648,3 +644,17 @@ class DeviceTab(tk.Frame):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
             messagebox.showinfo("Exported", f"Log saved to:\n{path}")
+
+    def apply_coordinates(self, lat: float, lon: float) -> None:
+        """Apply extracted GPS coordinates and automatically select nearest RTO."""
+        best_code, rto_name, dist = find_nearest_rto(lat, lon)
+        self._rto_input.set_rto(best_code, trigger_callback=False)
+        self._rto_coord_lbl.config(
+            text=f"GPS Extracted: {lat:.6f}°N, {lon:.6f}°E  ({rto_name} ~{dist:.1f}km away)"
+        )
+        self._lat.delete(0, "end")
+        self._lat.insert(0, f"{lat:.6f}")
+        self._lon.delete(0, "end")
+        self._lon.insert(0, f"{lon:.6f}")
+        self.append_log(f"📍 Location Loaded: {lat:.6f}, {lon:.6f} -> Nearest RTO: {best_code} ({rto_name})")
+
