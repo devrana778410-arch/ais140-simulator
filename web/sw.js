@@ -1,5 +1,5 @@
 // AIS-140 Simulator Service Worker (PWA)
-const CACHE_NAME = "ais140-cache-v1";
+const CACHE_NAME = "ais140-cache-v2";
 const ASSETS_TO_CACHE = [
   "/",
   "/style.css",
