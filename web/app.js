@@ -315,18 +315,24 @@ function applyProfileView(profile) {
     autoSosGroup.style.display = "flex";
     vregGroup.style.display = "none";
     singlePushSec.style.display = "flex";
+    btnSosOn.style.display = "";
+    btnSosOff.style.display = "";
   } else if (profile === "GPCB") {
     rtoGroup.style.display = "none";
     coordsRow.style.display = "flex";
     autoSosGroup.style.display = "none";
     vregGroup.style.display = "flex";
     singlePushSec.style.display = "none";
+    btnSosOn.style.display = "none";
+    btnSosOff.style.display = "none";
   } else if (profile === "CGM") {
     rtoGroup.style.display = "none";
     coordsRow.style.display = "flex";
     autoSosGroup.style.display = "none";
     vregGroup.style.display = "none";
     singlePushSec.style.display = "none";
+    btnSosOn.style.display = "none";
+    btnSosOff.style.display = "none";
   }
 }
 

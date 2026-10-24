@@ -8,6 +8,7 @@ import socket
 import threading
 import urllib.parse
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from socketserver import ThreadingMixIn
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -287,9 +288,14 @@ class AIS140WebHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(res)
 
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Handle each request in a separate thread so SSE never blocks API calls."""
+    daemon_threads = True
+
+
 def run(port=8080):
     host = "0.0.0.0"
-    server = HTTPServer((host, port), AIS140WebHandler)
+    server = ThreadedHTTPServer((host, port), AIS140WebHandler)
     print("=" * 60)
     print(f"🛰️ AIS-140 Web App & Socket Bridge running at:")
     print(f"   Local:   http://localhost:{port}")
