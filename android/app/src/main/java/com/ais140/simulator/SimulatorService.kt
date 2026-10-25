@@ -20,88 +20,73 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.OutputStream
+import java.net.InetSocketAddress
 import java.net.Socket
-import java.net.SocketException
 
 /**
- * Foreground service that manages the TCP connection to an AIS 140 server
- * and sends position packets at a configurable interval.
+ * Background Service managing the TCP connection to Parivahan/CGM/GPCB.
+ * Supports dual-port VLTD routing (port 9031 for Primary, port 9032 for Emergency).
  */
 class SimulatorService : Service() {
-
-    // ──────────────────────────── Constants ────────────────────────────
 
     companion object {
         const val CHANNEL_ID = "ais140_simulator_channel"
         const val NOTIFICATION_ID = 1001
 
-        // Broadcast actions
         const val ACTION_LOG = "com.ais140.simulator.ACTION_LOG"
         const val ACTION_STATUS = "com.ais140.simulator.ACTION_STATUS"
         const val EXTRA_LOG_MSG = "log_message"
         const val EXTRA_STATUS = "status"
         const val EXTRA_PACKETS_SENT = "packets_sent"
 
-        // Intent extras for start command
-        const val EXTRA_HOST = "host"
-        const val EXTRA_PORT = "port"
-        const val EXTRA_INTERVAL = "interval"
-        const val EXTRA_CONFIG = "config_json"
-
-        // Status values
-        const val STATUS_CONNECTED = "CONNECTED"
-        const val STATUS_DISCONNECTED = "DISCONNECTED"
-        const val STATUS_CONNECTING = "CONNECTING"
-        const val STATUS_ERROR = "ERROR"
+        const val STATUS_CONNECTED = "Connected"
+        const val STATUS_DISCONNECTED = "Stopped"
+        const val STATUS_CONNECTING = "Connecting"
+        const val STATUS_SENDING = "Sending"
+        const val STATUS_ERROR = "Error"
     }
 
-    // ──────────────────────────── State ────────────────────────────────
-
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var connectionJob: Job? = null
-    private var autoSendJob: Job? = null
-
-    private var socket: Socket? = null
-    private var outputStream: OutputStream? = null
+    private var loopJob: Job? = null
 
     private var packetsSent = 0
-    private var isConnected = false
-    private var isAutoSending = false
+    private var isRunning = false
+    private var emergencyMode: String? = null
 
-    // Current simulation parameters (updated from MainActivity via Binder)
     var config = PacketConfig()
-    var serverHost = "192.168.1.1"
-    var serverPort = 5000
-    var sendIntervalMs = 10_000L // 10 seconds default
-
-    // ──────────────────────────── Binder ───────────────────────────────
+    var serverHost = "commonlayer.parivahan.gov.in"
+    var serverPort = 9031
+    var emergencyPort = 9032
+    var sendIntervalMs = 10_000L
 
     inner class SimulatorBinder : Binder() {
         fun getService(): SimulatorService = this@SimulatorService
-
-        fun isConnected() = this@SimulatorService.isConnected
-        fun isAutoSending() = this@SimulatorService.isAutoSending
+        fun isRunning() = this@SimulatorService.isRunning
         fun getPacketsSent() = packetsSent
 
-        fun connect(host: String, port: Int) {
+        fun startSimulation(host: String, port: Int, intervalMs: Long) {
             serverHost = host
             serverPort = port
-            startConnection()
-        }
-
-        fun disconnect() = closeConnection("User disconnected")
-
-        fun sendPacketNow() = sendPositionPacketNow()
-
-        fun startAutoSend(intervalMs: Long) {
             sendIntervalMs = intervalMs
-            startAutoSend()
+            startSimulatorLoop()
         }
 
-        fun stopAutoSend() = this@SimulatorService.stopAutoSend()
+        fun stopSimulation() {
+            stopSimulatorLoop()
+        }
 
-        fun sendLogin() = sendLoginPacket()
+        fun sendSinglePacket(packetType: String) {
+            serviceScope.launch {
+                sendInstantPacket(packetType)
+            }
+        }
+
+        fun triggerSos(mode: String) {
+            emergencyMode = mode
+            serviceScope.launch {
+                sendInstantPacket(mode)
+            }
+        }
 
         fun updateConfig(newConfig: PacketConfig) {
             config = newConfig
@@ -109,144 +94,128 @@ class SimulatorService : Service() {
     }
 
     private val binder = SimulatorBinder()
-
     override fun onBind(intent: Intent): IBinder = binder
-
-    // ──────────────────────────── Lifecycle ────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Idle — tap to open"))
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_STICKY
+        startForeground(NOTIFICATION_ID, buildNotification("Simulator Ready"))
     }
 
     override fun onDestroy() {
-        closeConnection("Service destroyed")
+        stopSimulatorLoop()
         serviceScope.cancel()
         super.onDestroy()
     }
 
-    // ──────────────────────────── Connection ───────────────────────────
+    private fun startSimulatorLoop() {
+        if (isRunning) return
+        isRunning = true
+        packetsSent = 0
+        emergencyMode = null
 
-    private fun startConnection() {
-        connectionJob?.cancel()
-        connectionJob = serviceScope.launch {
+        loopJob?.cancel()
+        loopJob = serviceScope.launch {
             broadcastStatus(STATUS_CONNECTING)
-            broadcastLog("⏳ Connecting to $serverHost:$serverPort …")
-            updateNotification("Connecting to $serverHost:$serverPort")
+            broadcastLog("🚀 Starting Simulator: $serverHost:$serverPort (Interval: ${sendIntervalMs / 1000}s)")
+            updateNotification("Connecting...")
 
-            var attempt = 0
-            while (isActive) {
-                attempt++
-                try {
-                    val sock = Socket(serverHost, serverPort)
-                    sock.soTimeout = 30_000
-                    socket = sock
-                    outputStream = sock.getOutputStream()
-                    isConnected = true
-                    packetsSent = 0
+            val isVltd = config.profile == "VLTD"
 
-                    broadcastStatus(STATUS_CONNECTED)
-                    broadcastLog("✅ Connected to $serverHost:$serverPort (attempt $attempt)")
-                    updateNotification("Connected — 0 packets sent")
-
-                    // Wait until socket closes externally
-                    while (isActive && sock.isConnected && !sock.isClosed) {
-                        delay(1_000)
-                    }
-                    throw SocketException("Connection closed remotely")
-                } catch (e: Exception) {
-                    isConnected = false
-                    broadcastStatus(STATUS_ERROR)
-                    broadcastLog("❌ Connection lost: ${e.message}. Retrying in 5 s…")
-                    updateNotification("Reconnecting… (attempt ${attempt + 1})")
-                    closeSocketSilently()
-                    delay(5_000)
-                }
+            if (isVltd) {
+                // Step 1: Send Login ($LGN) on connect
+                broadcastLog("--- Sending Login & Health Sequence ---")
+                sendInstantPacket("LGN")
+                delay(1000)
+                // Step 2: Send Health ($HEL) on connect
+                sendInstantPacket("HEL")
+                delay(1000)
             }
-        }
-    }
 
-    private fun closeConnection(reason: String) {
-        autoSendJob?.cancel()
-        connectionJob?.cancel()
-        isConnected = false
-        isAutoSending = false
-        closeSocketSilently()
-        broadcastStatus(STATUS_DISCONNECTED)
-        broadcastLog("🔌 Disconnected: $reason")
-        updateNotification("Idle — tap to open")
-    }
+            broadcastStatus(STATUS_SENDING)
+            var cycle = 0
 
-    private fun closeSocketSilently() {
-        try { outputStream?.close() } catch (_: Exception) {}
-        try { socket?.close() } catch (_: Exception) {}
-        outputStream = null
-        socket = null
-    }
+            while (isActive && isRunning) {
+                cycle++
+                if (isVltd) {
+                    // Send periodic PVT
+                    sendInstantPacket("PVT")
 
-    // ──────────────────────────── Packet Sending ───────────────────────
+                    // If emergency mode active, also send EMR
+                    if (emergencyMode == "EMR") {
+                        delay(600)
+                        sendInstantPacket("EMR")
+                    } else if (emergencyMode == "SEM") {
+                        delay(600)
+                        sendInstantPacket("SEM")
+                        emergencyMode = null
+                    }
 
-    private fun sendLoginPacket() {
-        serviceScope.launch {
-            val packet = Ais140Packet.buildLoginPacket(config)
-            sendRaw(packet, "LOGIN")
-        }
-    }
-
-    private fun sendPositionPacketNow() {
-        serviceScope.launch {
-            val packet = Ais140Packet.buildPositionPacket(config)
-            sendRaw(packet, "POSITION")
-        }
-    }
-
-    private fun startAutoSend() {
-        autoSendJob?.cancel()
-        isAutoSending = true
-        autoSendJob = serviceScope.launch {
-            broadcastLog("🔄 Auto-send started (every ${sendIntervalMs / 1000} s)")
-            while (isActive && isAutoSending) {
-                if (isConnected) {
-                    val packet = Ais140Packet.buildPositionPacket(config)
-                    sendRaw(packet, "AUTO")
+                    // Periodically send HEL every 5 cycles
+                    if (cycle % 5 == 0) {
+                        delay(600)
+                        sendInstantPacket("HEL")
+                    }
                 } else {
-                    broadcastLog("⚠️ Not connected — skipping packet")
+                    // CGM / GPCB position send
+                    sendInstantPacket("PVT")
                 }
+
                 delay(sendIntervalMs)
             }
         }
     }
 
-    private fun stopAutoSend() {
-        autoSendJob?.cancel()
-        isAutoSending = false
-        broadcastLog("⏹ Auto-send stopped")
+    private fun stopSimulatorLoop() {
+        isRunning = false
+        emergencyMode = null
+        loopJob?.cancel()
+        broadcastStatus(STATUS_DISCONNECTED)
+        broadcastLog("⏹ Simulator Stopped.")
+        updateNotification("Stopped")
     }
 
-    private suspend fun sendRaw(packet: String, tag: String) = withContext(Dispatchers.IO) {
+    /**
+     * Sends an instant packet using direct socket connect-and-close pattern.
+     * Prevents TCP reset (WinError 10054 / Connection reset by peer) from Parivahan server.
+     */
+    private suspend fun sendInstantPacket(packetType: String) = withContext(Dispatchers.IO) {
+        val targetPort = if (packetType in listOf("EMR", "SEM")) emergencyPort else serverPort
+        val cfg = config.copy(seqNum = packetsSent + 1)
+
+        val packet = when (packetType) {
+            "LGN" -> Ais140Packet.buildLoginPacket(cfg)
+            "HEL" -> Ais140Packet.buildHealthPacket(cfg)
+            "PVT" -> Ais140Packet.buildPositionPacket(cfg)
+            "EMR" -> Ais140Packet.buildEmergencyPacket(cfg, mode = "EMR")
+            "SEM" -> Ais140Packet.buildEmergencyPacket(cfg, mode = "SEM")
+            else -> Ais140Packet.buildPositionPacket(cfg)
+        }
+
         try {
-            val os = outputStream ?: throw SocketException("No output stream")
-            val bytes = (packet + "\r\n").toByteArray(Charsets.UTF_8)
-            os.write(bytes)
-            os.flush()
+            Socket().use { sock ->
+                sock.soTimeout = 8000
+                // Connect with 6s timeout
+                sock.connect(InetSocketAddress(serverHost, targetPort), 6000)
+                val bytes = (packet + "\r\n").toByteArray(Charsets.UTF_8)
+                sock.getOutputStream().apply {
+                    write(bytes)
+                    flush()
+                }
+            }
+
             packetsSent++
-            broadcastLog("📤 [$tag] Sent packet #$packetsSent:\n$packet")
-            broadcastStatus(if (isConnected) STATUS_CONNECTED else STATUS_DISCONNECTED)
-            updateNotification("Connected — $packetsSent packets sent")
+            val preview = if (packet.length > 70) packet.substring(0, 70) + "..." else packet
+            broadcastLog("TX [$packetType] -> :$targetPort: $preview")
+            broadcastStatus(if (isRunning) STATUS_SENDING else STATUS_DISCONNECTED)
+            updateNotification("Sent: $packetsSent packets")
         } catch (e: Exception) {
-            broadcastLog("❌ Send failed [$tag]: ${e.message}")
-            isConnected = false
-            broadcastStatus(STATUS_ERROR)
-            closeSocketSilently()
+            broadcastLog("❌ Send failed [$packetType] on :$targetPort: ${e.message}")
+            if (isRunning) {
+                broadcastStatus(STATUS_ERROR)
+            }
         }
     }
-
-    // ──────────────────────────── Broadcasts ───────────────────────────
 
     private fun broadcastLog(message: String) {
         val intent = Intent(ACTION_LOG).apply {
@@ -263,8 +232,6 @@ class SimulatorService : Service() {
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
-    // ──────────────────────────── Notification ─────────────────────────
-
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -272,10 +239,9 @@ class SimulatorService : Service() {
                 "AIS 140 Simulator",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Persistent notification for AIS 140 simulation"
+                description = "AIS-140 Background Telematics Stream"
             }
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
     }
 
@@ -286,7 +252,7 @@ class SimulatorService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("AIS 140 Simulator")
+            .setContentTitle("AIS-140 Simulator")
             .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_menu_send)
             .setContentIntent(pendingIntent)
@@ -296,7 +262,9 @@ class SimulatorService : Service() {
     }
 
     private fun updateNotification(contentText: String) {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIFICATION_ID, buildNotification(contentText))
+        getSystemService(NotificationManager::class.java)?.notify(
+            NOTIFICATION_ID,
+            buildNotification(contentText)
+        )
     }
 }

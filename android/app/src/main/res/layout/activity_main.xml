@@ -5,73 +5,106 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/bg_app"
     tools:context=".MainActivity">
 
-    <!-- AppBar with title and status bar -->
+    <!-- Top App Bar -->
     <com.google.android.material.appbar.AppBarLayout
         android:id="@+id/appBarLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:theme="@style/ThemeOverlay.MaterialComponents.Dark.ActionBar">
+        android:background="@color/bg_sidebar"
+        app:elevation="0dp">
 
-        <com.google.android.material.appbar.MaterialToolbar
-            android:id="@+id/toolbar"
-            android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            android:background="?attr/colorPrimary"
-            app:title="@string/app_name"
-            app:titleTextColor="@android:color/white" />
-
-        <!-- Status bar row -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:background="?attr/colorSurface"
-            android:gravity="center_vertical"
+            android:layout_height="wrap_content"
             android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:paddingStart="16dp"
-            android:paddingEnd="16dp">
-
-            <com.google.android.material.chip.Chip
-                android:id="@+id/chipStatus"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="DISCONNECTED"
-                android:textColor="@android:color/white"
-                app:chipBackgroundColor="@android:color/darker_gray"
-                style="@style/Widget.Material3.Chip.Suggestion" />
-
-            <View
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
+            android:paddingEnd="16dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp">
 
             <TextView
-                android:id="@+id/tvPacketCount"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Packets: 0"
-                android:textAppearance="?attr/textAppearanceLabelMedium"
-                android:textColor="?attr/colorOnSurface" />
+                android:text="🛰️"
+                android:textSize="22sp"
+                android:layout_marginEnd="10dp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="AIS-140 SIMULATOR"
+                    android:textColor="@color/text_primary"
+                    android:textStyle="bold"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="VLTD • CGM • GPCB"
+                    android:textColor="@color/text_accent"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <!-- Status Indicator & Transmitted Count Badge -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="end">
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:text="STOPPED"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_primary"
+                    app:chipCornerRadius="6dp"
+                    app:chipBackgroundColor="@color/stopped"
+                    app:chipStrokeWidth="0dp"
+                    style="@style/Widget.Material3.Chip.Suggestion" />
+
+                <TextView
+                    android:id="@+id/tvPacketCount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="TX: 0"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
         </LinearLayout>
 
+        <!-- Profile / Section Tabs (Slate dark styling) -->
         <com.google.android.material.tabs.TabLayout
             android:id="@+id/tabLayout"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="40dp"
+            android:background="@color/bg_sidebar"
+            app:tabIndicatorColor="@color/text_accent"
+            app:tabIndicatorHeight="3dp"
+            app:tabSelectedTextColor="@color/text_accent"
+            app:tabTextColor="@color/text_secondary"
             app:tabMode="fixed"
-            app:tabGravity="fill"
-            app:tabTextColor="?attr/colorOnSurface"
-            app:tabSelectedTextColor="?attr/colorPrimary"
-            app:tabIndicatorColor="?attr/colorPrimary" />
-
+            app:tabGravity="fill" />
     </com.google.android.material.appbar.AppBarLayout>
 
-    <!-- Main content -->
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/viewPager"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:background="@color/bg_app"
         app:layout_behavior="@string/appbar_scrolling_view_behavior" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
