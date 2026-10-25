@@ -4,9 +4,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 /**
- * Configuration for an AIS 140 packet.
+ * Configuration for an AIS 140 packet across VLTD, CGM, and GPCB profiles.
  */
 data class PacketConfig(
     val profile: String = "VLTD",
@@ -41,6 +43,67 @@ object Ais140Packet {
             timeZone = TimeZone.getTimeZone("UTC")
         }
         return Pair(dateFmt.format(now), timeFmt.format(now))
+    }
+
+    private fun formatCoord(value: Double, intDigits: Int = 3): String {
+        val absVal = Math.abs(value)
+        val intPart = absVal.toInt()
+        val fracPart = Math.round((absVal - intPart) * 1_000_000.0).toInt()
+        return String.format(Locale.US, "%0${intDigits}d.%06d", intPart, fracPart)
+    }
+
+    /**
+     * Computes HMAC-SHA256 signature using ASCII key bytes and UTF-8 body bytes.
+     */
+    private fun hmacSha256(key: String, body: String): String {
+        if (key.isBlank()) return ""
+        return try {
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(key.toByteArray(Charsets.US_ASCII), "HmacSHA256"))
+            mac.doFinal(body.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    /**
+     * Builds standard CGM packet ($NMP wire format with trailing HMAC-SHA256).
+     */
+    fun buildCgmPacket(config: PacketConfig): String {
+        val (dateStr, timeStr) = getUtcCalendar()
+        val latStr = formatCoord(config.latitude, 3)
+        val lonStr = formatCoord(config.longitude, 3)
+        val cellData = "16D5,56C5,56C2,16D5,14,5909,16D5,14,37CB,16D5,14,5980,16D5,14,0000"
+
+        val body = "\$NMP,${config.vendor},4.0.27,NR,01,L,${config.imei},${config.vehicleReg},1," +
+                "$dateStr,$timeStr," +
+                "$latStr,N,$lonStr,E," +
+                String.format(Locale.US, "%.1f", config.speed) + "," +
+                String.format(Locale.US, "%.2f", config.heading) + "," +
+                "46,136.7,0.7,0.4,${config.operator},0,1,25.8,4.0,0,C,13,404,05," +
+                "$cellData,00,001994,0.80,0.00,0,(0,0,0)*"
+
+        val signature = hmacSha256(config.hmacKey, body)
+        return "$body,$signature"
+    }
+
+    /**
+     * Builds standard GPCB packet (Identical to CGM $NMP but WITHOUT trailing HMAC signature).
+     */
+    fun buildGpcbPacket(config: PacketConfig): String {
+        val (dateStr, timeStr) = getUtcCalendar()
+        val latStr = formatCoord(config.latitude, 3)
+        val lonStr = formatCoord(config.longitude, 3)
+        val cellData = "16D5,56C5,56C2,16D5,14,5909,16D5,14,37CB,16D5,14,5980,16D5,14,0000"
+
+        return "\$NMP,${config.vendor},4.0.27,NR,01,L,${config.imei},${config.vehicleReg},1," +
+                "$dateStr,$timeStr," +
+                "$latStr,N,$lonStr,E," +
+                String.format(Locale.US, "%.1f", config.speed) + "," +
+                String.format(Locale.US, "%.2f", config.heading) + "," +
+                "46,136.7,0.7,0.4,${config.operator},0,1,25.8,4.0,0,C,13,404,05," +
+                "$cellData,00,001994,0.80,0.00,0,(0,0,0)*"
     }
 
     /**

@@ -242,22 +242,31 @@ class ConfigFragment : Fragment() {
 
             when (profile) {
                 "VLTD" -> {
+                    binding.tvServerBanner.text = "Server: commonlayer.parivahan.gov.in | Primary: :9031 | Emergency: :9032"
                     binding.etHost.setText("commonlayer.parivahan.gov.in")
                     binding.etPort.setText("9031")
                     binding.sosButtonRow.visibility = View.VISIBLE
+                    binding.manualPushSection.visibility = View.VISIBLE
                     binding.vregGroup.visibility = View.GONE
+                    binding.hmacGroup.visibility = View.GONE
                 }
                 "GPCB" -> {
+                    binding.tvServerBanner.text = "Server: 103.234.162.31:9999 (Rapid Auto-Connect 0.5s / 0.1s)"
                     binding.etHost.setText("103.234.162.31")
                     binding.etPort.setText("9999")
                     binding.sosButtonRow.visibility = View.GONE
+                    binding.manualPushSection.visibility = View.GONE
                     binding.vregGroup.visibility = View.VISIBLE
+                    binding.hmacGroup.visibility = View.GONE
                 }
                 "CGM" -> {
+                    binding.tvServerBanner.text = "Server: 103.234.162.150:5013 (HMAC-SHA256 Signed)"
                     binding.etHost.setText("103.234.162.150")
                     binding.etPort.setText("5013")
                     binding.sosButtonRow.visibility = View.GONE
+                    binding.manualPushSection.visibility = View.GONE
                     binding.vregGroup.visibility = View.GONE
+                    binding.hmacGroup.visibility = View.VISIBLE
                 }
             }
         }
@@ -265,15 +274,29 @@ class ConfigFragment : Fragment() {
         binding.btnProfileVltd.setOnClickListener { selectProfile("VLTD") }
         binding.btnProfileGpcb.setOnClickListener { selectProfile("GPCB") }
         binding.btnProfileCgm.setOnClickListener { selectProfile("CGM") }
+
+        // Initial profile selection
+        selectProfile("VLTD")
     }
 
     private fun buildConfig(): PacketConfig {
+        val lat = binding.etLat.text.toString().toDoubleOrNull() ?: 21.705100
+        val lon = binding.etLon.text.toString().toDoubleOrNull() ?: 72.995900
+        val vreg = if (currentProfile == "GPCB") {
+            binding.etVehicleReg.text.toString().trim().ifEmpty { "GJ01AC0000" }
+        } else {
+            "GJ01AC0000"
+        }
+        val hmacKey = binding.etHmacKey.text.toString().trim().ifEmpty { "26bcb9e368440d4a" }
+        val imei = binding.etImei.text.toString().trim().ifEmpty { "869833088601301" }
+
         return PacketConfig(
             profile = currentProfile,
-            imei = binding.etImei.text.toString().trim(),
-            vehicleReg = binding.etVehicleReg.text.toString().trim(),
-            latitude = binding.etLat.text.toString().toDoubleOrNull() ?: 21.705100,
-            longitude = binding.etLon.text.toString().toDoubleOrNull() ?: 72.995900
+            imei = imei,
+            vehicleReg = vreg,
+            latitude = lat,
+            longitude = lon,
+            hmacKey = hmacKey
         )
     }
 
@@ -283,11 +306,31 @@ class ConfigFragment : Fragment() {
         if (running) {
             binding.btnStartStop.text = "⏹ STOP SIMULATOR"
             binding.btnStartStop.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.danger))
-            binding.btnSosOn.isEnabled = true
-            binding.btnSosOff.isEnabled = true
+            binding.btnProfileVltd.isEnabled = false
+            binding.btnProfileGpcb.isEnabled = false
+            binding.btnProfileCgm.isEnabled = false
+            binding.etHost.isEnabled = false
+            binding.etPort.isEnabled = false
+            binding.etInterval.isEnabled = false
+            binding.etImei.isEnabled = false
+            binding.etVehicleReg.isEnabled = false
+            binding.etHmacKey.isEnabled = false
+            if (currentProfile == "VLTD") {
+                binding.btnSosOn.isEnabled = true
+                binding.btnSosOff.isEnabled = true
+            }
         } else {
             binding.btnStartStop.text = "▶ START SIMULATOR"
             binding.btnStartStop.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.success))
+            binding.btnProfileVltd.isEnabled = true
+            binding.btnProfileGpcb.isEnabled = true
+            binding.btnProfileCgm.isEnabled = true
+            binding.etHost.isEnabled = true
+            binding.etPort.isEnabled = true
+            binding.etInterval.isEnabled = true
+            binding.etImei.isEnabled = true
+            binding.etVehicleReg.isEnabled = true
+            binding.etHmacKey.isEnabled = true
             binding.btnSosOn.isEnabled = false
             binding.btnSosOff.isEnabled = false
         }

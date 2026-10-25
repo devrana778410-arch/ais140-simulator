@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.Locale
 
 /**
  * Background Service managing the TCP connection to Parivahan/CGM/GPCB.
@@ -52,6 +53,8 @@ class SimulatorService : Service() {
     private var packetsSent = 0
     private var isRunning = false
     private var emergencyMode: String? = null
+    private var currentSocket: Socket? = null
+    private var connectAttempt: Int = 0
 
     var config = PacketConfig()
     var serverHost = "commonlayer.parivahan.gov.in"
@@ -108,68 +111,184 @@ class SimulatorService : Service() {
         super.onDestroy()
     }
 
+    private fun closeSocket() {
+        try {
+            currentSocket?.shutdownInput()
+        } catch (_: Exception) {}
+        try {
+            currentSocket?.shutdownOutput()
+        } catch (_: Exception) {}
+        try {
+            currentSocket?.close()
+        } catch (_: Exception) {}
+        currentSocket = null
+    }
+
+    private suspend fun ensurePersistentSocket(
+        host: String,
+        port: Int,
+        timeoutMs: Int,
+        retryDelayMs: Long
+    ): Socket? = withContext(Dispatchers.IO) {
+        while (isActive && isRunning) {
+            val existing = currentSocket
+            if (existing != null && !existing.isClosed && existing.isConnected) {
+                return@withContext existing
+            }
+            closeSocket()
+
+            connectAttempt++
+            broadcastLog("Connecting to $host:$port (attempt $connectAttempt)...")
+            broadcastStatus(STATUS_CONNECTING)
+            updateNotification("Connecting (attempt $connectAttempt)...")
+
+            try {
+                val sock = Socket()
+                sock.soTimeout = 15000
+                sock.connect(InetSocketAddress(host, port), timeoutMs)
+                broadcastLog("Connected to $host:$port")
+                broadcastStatus(STATUS_CONNECTED)
+                currentSocket = sock
+                connectAttempt = 0
+                return@withContext sock
+            } catch (e: Exception) {
+                broadcastLog("Connect failed (attempt $connectAttempt): ${e.message ?: "Connection timed out"}")
+                delay(retryDelayMs)
+            }
+        }
+        null
+    }
+
     private fun startSimulatorLoop() {
         if (isRunning) return
         isRunning = true
         packetsSent = 0
         emergencyMode = null
+        connectAttempt = 0
 
         loopJob?.cancel()
         loopJob = serviceScope.launch {
+            val profile = config.profile
             broadcastStatus(STATUS_CONNECTING)
-            broadcastLog("🚀 Starting Simulator: $serverHost:$serverPort (Interval: ${sendIntervalMs / 1000}s)")
+            broadcastLog("🚀 Starting $profile Simulator: $serverHost:$serverPort (Interval: ${sendIntervalMs / 1000}s)")
             updateNotification("Connecting...")
 
-            val isVltd = config.profile == "VLTD"
+            when (profile) {
+                "VLTD" -> runVltdLoop()
+                "GPCB" -> runGpcbLoop()
+                "CGM"  -> runCgmLoop()
+                else   -> runVltdLoop()
+            }
+        }
+    }
 
-            if (isVltd) {
-                // Step 1: Send Login ($LGN) on connect
-                broadcastLog("--- Sending Login & Health Sequence ---")
-                sendInstantPacket("LGN")
-                delay(1000)
-                // Step 2: Send Health ($HEL) on connect
+    private suspend fun CoroutineScope.runVltdLoop() {
+        // Step 1: Send Login ($LGN) on connect
+        broadcastLog("--- Sending Login & Health Sequence ---")
+        sendInstantPacket("LGN")
+        delay(1000)
+        // Step 2: Send Health ($HEL) on connect
+        sendInstantPacket("HEL")
+        delay(1000)
+
+        broadcastStatus(STATUS_SENDING)
+        var cycle = 0
+
+        while (isActive && isRunning) {
+            cycle++
+            // Send periodic PVT
+            sendInstantPacket("PVT")
+
+            // If emergency mode active, also send EMR or SEM
+            if (emergencyMode == "EMR") {
+                delay(600)
+                sendInstantPacket("EMR")
+            } else if (emergencyMode == "SEM") {
+                delay(600)
+                sendInstantPacket("SEM")
+                emergencyMode = null
+            }
+
+            // Periodically send HEL every 5 cycles
+            if (cycle % 5 == 0) {
+                delay(600)
                 sendInstantPacket("HEL")
-                delay(1000)
             }
 
-            broadcastStatus(STATUS_SENDING)
-            var cycle = 0
+            delay(sendIntervalMs)
+        }
+    }
 
-            while (isActive && isRunning) {
-                cycle++
-                if (isVltd) {
-                    // Send periodic PVT
-                    sendInstantPacket("PVT")
+    private suspend fun CoroutineScope.runGpcbLoop() {
+        var cycle = 0
+        while (isActive && isRunning) {
+            // Rapid auto-connect: 500ms timeout, 100ms retry delay until connected!
+            val sock = ensurePersistentSocket(serverHost, serverPort, timeoutMs = 500, retryDelayMs = 100L)
+            if (sock == null || !isRunning) break
 
-                    // If emergency mode active, also send EMR
-                    if (emergencyMode == "EMR") {
-                        delay(600)
-                        sendInstantPacket("EMR")
-                    } else if (emergencyMode == "SEM") {
-                        delay(600)
-                        sendInstantPacket("SEM")
-                        emergencyMode = null
-                    }
+            cycle++
+            val cfg = config.copy(seqNum = packetsSent + 1)
+            val packet = Ais140Packet.buildGpcbPacket(cfg)
 
-                    // Periodically send HEL every 5 cycles
-                    if (cycle % 5 == 0) {
-                        delay(600)
-                        sendInstantPacket("HEL")
-                    }
-                } else {
-                    // CGM / GPCB position send
-                    sendInstantPacket("PVT")
+            try {
+                val bytes = packet.toByteArray(Charsets.UTF_8)
+                sock.getOutputStream().apply {
+                    write(bytes)
+                    flush()
                 }
-
-                delay(sendIntervalMs)
+                packetsSent++
+                val preview = if (packet.length > 70) packet.substring(0, 70) + "..." else packet
+                broadcastLog("TX [${String.format(Locale.US, "%04d", packetsSent)}]: $preview")
+                broadcastStatus(STATUS_SENDING)
+                updateNotification("Sent: $packetsSent packets")
+            } catch (e: Exception) {
+                broadcastLog("Send failed (${e.message}) - reconnecting...")
+                closeSocket()
+                continue
             }
+
+            delay(sendIntervalMs)
+        }
+    }
+
+    private suspend fun CoroutineScope.runCgmLoop() {
+        var cycle = 0
+        while (isActive && isRunning) {
+            // Persistent socket: 10s timeout, 5s retry delay
+            val sock = ensurePersistentSocket(serverHost, serverPort, timeoutMs = 10000, retryDelayMs = 5000L)
+            if (sock == null || !isRunning) break
+
+            cycle++
+            val cfg = config.copy(seqNum = packetsSent + 1)
+            val packet = Ais140Packet.buildCgmPacket(cfg)
+
+            try {
+                val bytes = packet.toByteArray(Charsets.UTF_8)
+                sock.getOutputStream().apply {
+                    write(bytes)
+                    flush()
+                }
+                packetsSent++
+                val preview = if (packet.length > 70) packet.substring(0, 70) + "..." else packet
+                broadcastLog("TX [${String.format(Locale.US, "%04d", packetsSent)}]: $preview")
+                broadcastStatus(STATUS_SENDING)
+                updateNotification("Sent: $packetsSent packets")
+            } catch (e: Exception) {
+                broadcastLog("Send failed (${e.message}) - reconnecting...")
+                closeSocket()
+                continue
+            }
+
+            delay(sendIntervalMs)
         }
     }
 
     private fun stopSimulatorLoop() {
         isRunning = false
         emergencyMode = null
+        connectAttempt = 0
         loopJob?.cancel()
+        closeSocket()
         broadcastStatus(STATUS_DISCONNECTED)
         broadcastLog("⏹ Simulator Stopped.")
         updateNotification("Stopped")
@@ -186,10 +305,22 @@ class SimulatorService : Service() {
         val packet = when (packetType) {
             "LGN" -> Ais140Packet.buildLoginPacket(cfg)
             "HEL" -> Ais140Packet.buildHealthPacket(cfg)
-            "PVT" -> Ais140Packet.buildPositionPacket(cfg)
             "EMR" -> Ais140Packet.buildEmergencyPacket(cfg, mode = "EMR")
             "SEM" -> Ais140Packet.buildEmergencyPacket(cfg, mode = "SEM")
-            else -> Ais140Packet.buildPositionPacket(cfg)
+            "PVT" -> {
+                when (config.profile) {
+                    "CGM"  -> Ais140Packet.buildCgmPacket(cfg)
+                    "GPCB" -> Ais140Packet.buildGpcbPacket(cfg)
+                    else   -> Ais140Packet.buildPositionPacket(cfg)
+                }
+            }
+            else -> {
+                when (config.profile) {
+                    "CGM"  -> Ais140Packet.buildCgmPacket(cfg)
+                    "GPCB" -> Ais140Packet.buildGpcbPacket(cfg)
+                    else   -> Ais140Packet.buildPositionPacket(cfg)
+                }
+            }
         }
 
         try {
@@ -197,7 +328,7 @@ class SimulatorService : Service() {
                 sock.soTimeout = 8000
                 // Connect with 6s timeout
                 sock.connect(InetSocketAddress(serverHost, targetPort), 6000)
-                val bytes = (packet + "\r\n").toByteArray(Charsets.UTF_8)
+                val bytes = packet.toByteArray(Charsets.UTF_8)
                 sock.getOutputStream().apply {
                     write(bytes)
                     flush()
