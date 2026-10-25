@@ -5,6 +5,7 @@
 #define MyAppVersion "2.0.0"
 #define MyAppPublisher "AIS140 Telematics"
 #define MyAppExeName "AIS140-Simulator.exe"
+#define SourceExe "dist\AIS140-Simulator-Portable.exe"
 
 [Setup]
 AppId={{D37F8E80-874C-485A-8E29-B5B9F4084F81}
@@ -30,8 +31,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\AIS140-Simulator\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\AIS140-Simulator\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

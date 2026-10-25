@@ -45,7 +45,7 @@ class MainActivity : AppCompatActivity() {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
             simulatorService = service as SimulatorService.SimulatorBinder
             isBound = true
-            broadcastLog("Service bound successfully")
+            appendLog("Service bound successfully")
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
