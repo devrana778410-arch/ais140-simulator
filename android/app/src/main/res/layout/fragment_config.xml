@@ -261,6 +261,61 @@
                         android:singleLine="true" />
                 </LinearLayout>
 
+                <!-- RTO Location Dropdown & Search (VLTD profile only) -->
+                <LinearLayout
+                    android:id="@+id/rtoGroup"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginBottom="10dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="RTO Location (Search &amp; Select)"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp"
+                        android:layout_marginBottom="4dp" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/tilRto"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        app:boxStrokeColor="@color/border_color"
+                        app:boxBackgroundColor="@color/bg_input"
+                        app:boxCornerRadiusBottomEnd="8dp"
+                        app:boxCornerRadiusBottomStart="8dp"
+                        app:boxCornerRadiusTopEnd="8dp"
+                        app:boxCornerRadiusTopStart="8dp"
+                        app:hintEnabled="false">
+
+                        <AutoCompleteTextView
+                            android:id="@+id/actvRto"
+                            android:layout_width="match_parent"
+                            android:layout_height="44dp"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:textSize="13sp"
+                            android:textColor="@color/text_primary"
+                            android:textColorHint="@color/text_muted"
+                            android:hint="Search RTO (e.g. GJ-16, Bharuch, Surat)..."
+                            android:inputType="text"
+                            android:completionThreshold="1" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <!-- Coordinate feedback label -->
+                    <TextView
+                        android:id="@+id/tvRtoCoords"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="GPS Target: 21.705100°N, 72.995900°E (Bharuch)"
+                        android:textColor="@color/text_accent"
+                        android:textSize="11sp"
+                        android:fontFamily="monospace"
+                        android:layout_marginTop="4dp" />
+                </LinearLayout>
+
                 <!-- Latitude & Longitude row -->
                 <LinearLayout
                     android:id="@+id/coordsRow"

@@ -16,6 +16,7 @@ import android.text.style.ForegroundColorSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -204,6 +205,7 @@ class ConfigFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        setupRtoDropdown()
         setupProfileButtons()
         setupActions()
         (activity as? MainActivity)?.pendingCoordinates?.let { coords ->
@@ -211,10 +213,39 @@ class ConfigFragment : Fragment() {
         }
     }
 
+    private fun setupRtoDropdown() {
+        val adapter = ArrayAdapter(
+            requireContext(),
+            R.layout.item_rto_dropdown,
+            RtoData.RTO_LIST
+        )
+        binding.actvRto.setAdapter(adapter)
+
+        // Default selection: GJ-16 Bharuch
+        val defaultRto = RtoData.getByCode("GJ-16") ?: RtoData.RTO_LIST[15]
+        binding.actvRto.setText(defaultRto.toString(), false)
+        updateRtoCoordinates(defaultRto.lat, defaultRto.lon, defaultRto.name)
+
+        binding.actvRto.setOnItemClickListener { parent, _, position, _ ->
+            val selected = parent.getItemAtPosition(position) as? RtoItem
+            if (selected != null) {
+                updateRtoCoordinates(selected.lat, selected.lon, selected.name)
+            }
+        }
+    }
+
+    private fun updateRtoCoordinates(lat: Double, lon: Double, name: String? = null) {
+        val rtoName = name ?: RtoData.findNearestRto(lat, lon).name
+        binding.tvRtoCoords.text = "GPS Target: %.6f°N, %.6f°E (%s)".format(Locale.US, lat, lon, rtoName)
+        binding.etLat.setText(String.format(Locale.US, "%.6f", lat))
+        binding.etLon.setText(String.format(Locale.US, "%.6f", lon))
+    }
+
     fun setCoordinates(lat: Double, lon: Double) {
         if (_binding != null) {
-            binding.etLat.setText(String.format(Locale.US, "%.6f", lat))
-            binding.etLon.setText(String.format(Locale.US, "%.6f", lon))
+            val nearest = RtoData.findNearestRto(lat, lon)
+            binding.actvRto.setText(nearest.toString(), false)
+            updateRtoCoordinates(lat, lon, nearest.name)
         }
     }
 
@@ -245,6 +276,7 @@ class ConfigFragment : Fragment() {
                     binding.tvServerBanner.text = "Server: commonlayer.parivahan.gov.in | Primary: :9031 | Emergency: :9032"
                     binding.etHost.setText("commonlayer.parivahan.gov.in")
                     binding.etPort.setText("9031")
+                    binding.rtoGroup.visibility = View.VISIBLE
                     binding.sosButtonRow.visibility = View.VISIBLE
                     binding.manualPushSection.visibility = View.VISIBLE
                     binding.vregGroup.visibility = View.GONE
@@ -254,6 +286,7 @@ class ConfigFragment : Fragment() {
                     binding.tvServerBanner.text = "Server: 103.234.162.31:9999 (Rapid Auto-Connect 0.5s / 0.1s)"
                     binding.etHost.setText("103.234.162.31")
                     binding.etPort.setText("9999")
+                    binding.rtoGroup.visibility = View.GONE
                     binding.sosButtonRow.visibility = View.GONE
                     binding.manualPushSection.visibility = View.GONE
                     binding.vregGroup.visibility = View.VISIBLE
@@ -263,6 +296,7 @@ class ConfigFragment : Fragment() {
                     binding.tvServerBanner.text = "Server: 103.234.162.150:5013 (HMAC-SHA256 Signed)"
                     binding.etHost.setText("103.234.162.150")
                     binding.etPort.setText("5013")
+                    binding.rtoGroup.visibility = View.GONE
                     binding.sosButtonRow.visibility = View.GONE
                     binding.manualPushSection.visibility = View.GONE
                     binding.vregGroup.visibility = View.GONE
@@ -315,6 +349,7 @@ class ConfigFragment : Fragment() {
             binding.etImei.isEnabled = false
             binding.etVehicleReg.isEnabled = false
             binding.etHmacKey.isEnabled = false
+            binding.actvRto.isEnabled = false
             if (currentProfile == "VLTD") {
                 binding.btnSosOn.isEnabled = true
                 binding.btnSosOff.isEnabled = true
@@ -331,6 +366,7 @@ class ConfigFragment : Fragment() {
             binding.etImei.isEnabled = true
             binding.etVehicleReg.isEnabled = true
             binding.etHmacKey.isEnabled = true
+            binding.actvRto.isEnabled = true
             binding.btnSosOn.isEnabled = false
             binding.btnSosOff.isEnabled = false
         }
