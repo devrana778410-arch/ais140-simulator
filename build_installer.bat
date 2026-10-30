@@ -4,7 +4,10 @@ echo ===================================================
 echo Building AIS-140 Simulator Windows Installer (.exe)
 echo ===================================================
 
-set "ISCC_PATH=C:\Users\pinky\AppData\Local\Programs\Antigravity IDE\resources\app\node_modules\innosetup\bin\ISCC.exe"
+set "ISCC_PATH=C:\Users\PC\AppData\Local\Programs\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC_PATH%" set "ISCC_PATH=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC_PATH%" set "ISCC_PATH=C:\Program Files\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC_PATH%" set "ISCC_PATH=C:\Users\pinky\AppData\Local\Programs\Antigravity IDE\resources\app\node_modules\innosetup\bin\ISCC.exe"
 
 if not exist "%ISCC_PATH%" (
     echo [ERROR] Inno Setup compiler (ISCC.exe) not found at:
