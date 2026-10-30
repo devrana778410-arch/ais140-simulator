@@ -19,19 +19,24 @@ from src.rto_data import RTO_TABLE, search_rto, code_from_display
 from src.packet import build_packet as build_cgm_packet
 from src.gpcb_packet import build_packet as build_gpcb_packet
 from src.vltd_packet import build_packet as build_vltd_packet
+from src.psdn_packet import build_packet as build_psdn_packet
 from src.client import DeviceClient
 
 START_TIME = time.time()
 
 PACKET_BUILDERS = {
-    "VLTD": build_vltd_packet,
-    "CGM":  build_cgm_packet,
-    "GPCB": build_gpcb_packet,
+    "VLTD":        build_vltd_packet,
+    "CGM":         build_cgm_packet,
+    "GPCB":        build_gpcb_packet,
+    "PSDN":        build_psdn_packet,
+    "GPCB (PSDN)": build_psdn_packet,
 }
 
 PROFILE_SERVERS = {
-    "CGM":  {"host": "103.234.162.150", "port": 5013, "connect_timeout": 10, "retry_delay": 5},
-    "GPCB": {"host": "103.234.162.31",  "port": 9999, "connect_timeout": 0.5, "retry_delay": 0.1},
+    "CGM":         {"host": "103.234.162.150", "port": 5013,  "connect_timeout": 10, "retry_delay": 5},
+    "GPCB":        {"host": "103.234.162.31",  "port": 9999,  "connect_timeout": 0.5, "retry_delay": 0.1},
+    "PSDN":        {"host": "43.205.159.137",  "port": 17003, "connect_timeout": 10, "retry_delay": 5},
+    "GPCB (PSDN)": {"host": "43.205.159.137",  "port": 17003, "connect_timeout": 10, "retry_delay": 5},
     "VLTD": {
         "host": "commonlayer.parivahan.gov.in",
         "port": 9031,

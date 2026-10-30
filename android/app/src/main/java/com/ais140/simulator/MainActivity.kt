@@ -271,6 +271,9 @@ class ConfigFragment : Fragment() {
             binding.btnProfileCgm.strokeColor = android.content.res.ColorStateList.valueOf(if (profile == "CGM") accentColor else borderColor)
             binding.btnProfileCgm.setTextColor(if (profile == "CGM") primaryText else secondaryText)
 
+            binding.btnProfilePsdn.strokeColor = android.content.res.ColorStateList.valueOf(if (profile == "PSDN") accentColor else borderColor)
+            binding.btnProfilePsdn.setTextColor(if (profile == "PSDN") primaryText else secondaryText)
+
             when (profile) {
                 "VLTD" -> {
                     binding.tvServerBanner.text = "Server: commonlayer.parivahan.gov.in | Primary: :9031 | Emergency: :9032"
@@ -302,12 +305,23 @@ class ConfigFragment : Fragment() {
                     binding.vregGroup.visibility = View.GONE
                     binding.hmacGroup.visibility = View.VISIBLE
                 }
+                "PSDN" -> {
+                    binding.tvServerBanner.text = "Server: 43.205.159.137:17003 (ONTC / PSDN GPCB Gateway)"
+                    binding.etHost.setText("43.205.159.137")
+                    binding.etPort.setText("17003")
+                    binding.rtoGroup.visibility = View.GONE
+                    binding.sosButtonRow.visibility = View.GONE
+                    binding.manualPushSection.visibility = View.GONE
+                    binding.vregGroup.visibility = View.VISIBLE
+                    binding.hmacGroup.visibility = View.GONE
+                }
             }
         }
 
         binding.btnProfileVltd.setOnClickListener { selectProfile("VLTD") }
         binding.btnProfileGpcb.setOnClickListener { selectProfile("GPCB") }
         binding.btnProfileCgm.setOnClickListener { selectProfile("CGM") }
+        binding.btnProfilePsdn.setOnClickListener { selectProfile("PSDN") }
 
         // Initial profile selection
         selectProfile("VLTD")
@@ -316,7 +330,7 @@ class ConfigFragment : Fragment() {
     private fun buildConfig(): PacketConfig {
         val lat = binding.etLat.text.toString().toDoubleOrNull() ?: 21.705100
         val lon = binding.etLon.text.toString().toDoubleOrNull() ?: 72.995900
-        val vreg = if (currentProfile == "GPCB") {
+        val vreg = if (currentProfile == "GPCB" || currentProfile == "PSDN") {
             binding.etVehicleReg.text.toString().trim().ifEmpty { "GJ01AC0000" }
         } else {
             "GJ01AC0000"

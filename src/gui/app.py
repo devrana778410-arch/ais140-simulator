@@ -1,25 +1,32 @@
 # Main application window — Modern Minimalist Sidebar Layout with Toggleable Debug Mode
+import csv
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import datetime
 from .device_tab import DeviceTab, PROFILE_SERVER
 from .styles import COLORS, FONTS, apply_theme
 from ..client import DeviceClient
 from ..geo_link import extract_coordinates
+from ..rto_data import get_rto_coords, resolve_rto
 from ..packet import build_packet as build_cgm_packet
 from ..gpcb_packet import build_packet as build_gpcb_packet
 from ..vltd_packet import build_packet as build_vltd_packet
+from ..psdn_packet import build_packet as build_psdn_packet
 
 PACKET_BUILDERS = {
-    "CGM":  build_cgm_packet,
-    "GPCB": build_gpcb_packet,
-    "VLTD": build_vltd_packet,
+    "CGM":         build_cgm_packet,
+    "GPCB":        build_gpcb_packet,
+    "VLTD":        build_vltd_packet,
+    "GPCB (PSDN)": build_psdn_packet,
+    "PSDN":        build_psdn_packet,
 }
 
 PROFILE_BADGE_COLORS = {
-    "VLTD": ("#38bdf8", "#082f49"),  # Sky text on deep sky
-    "CGM":  ("#a78bfa", "#2e1065"),  # Violet text on deep violet
-    "GPCB": ("#34d399", "#064e3b"),  # Emerald text on deep emerald
+    "VLTD":        ("#38bdf8", "#082f49"),  # Sky text on deep sky
+    "CGM":         ("#a78bfa", "#2e1065"),  # Violet text on deep violet
+    "GPCB":        ("#34d399", "#064e3b"),  # Emerald text on deep emerald
+    "GPCB (PSDN)": ("#f59e0b", "#451a03"),  # Amber text on deep amber
+    "PSDN":        ("#f59e0b", "#451a03"),  # Amber text on deep amber
 }
 
 
@@ -111,6 +118,15 @@ class SimulatorApp:
             command=self._add_device
         )
         add_btn.pack(side="right")
+
+        import_btn = tk.Button(
+            dev_header, text="📂 CSV", font=FONTS["caption"],
+            bg=COLORS["bg_card"], fg="#38bdf8",
+            activebackground=COLORS["info"], activeforeground="#ffffff",
+            relief="flat", bd=0, padx=8, pady=2, cursor="hand2",
+            command=self._import_csv
+        )
+        import_btn.pack(side="right", padx=(0, 4))
 
         # Scrollable Device Tiles Container
         self._tiles_canvas = tk.Canvas(
@@ -269,6 +285,77 @@ class SimulatorApp:
             lat, lon = coords
             self._devices[self._selected_id]["tab"].apply_coordinates(lat, lon)
             self._link_entry.delete(0, "end")
+
+    def _import_csv(self) -> None:
+        """Batch import vehicles from a CSV spreadsheet (similar to base.apk batch feature)."""
+        path = filedialog.askopenfilename(
+            title="Import Vehicles from CSV",
+            filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")]
+        )
+        if not path:
+            return
+
+        imported_count = 0
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+
+            if not rows:
+                messagebox.showwarning("Empty File", "The selected CSV file contains no records.")
+                return
+
+            for row in rows:
+                imei = row.get("imei") or row.get("IMEI") or ""
+                imei = str(imei).strip()
+                if not imei:
+                    continue
+
+                vreg = row.get("vehicle_no") or row.get("vehicleNumber") or row.get("vreg") or "GJ01AC0000"
+                vreg = str(vreg).strip()
+
+                rto = row.get("rto") or row.get("RTO") or ""
+                rto = str(rto).strip()
+
+                lat_str = row.get("latitude") or row.get("lat") or ""
+                lon_str = row.get("longitude") or row.get("lon") or ""
+
+                if lat_str and lon_str:
+                    try:
+                        lat = float(lat_str)
+                        lon = float(lon_str)
+                    except ValueError:
+                        lat, lon = get_rto_coords(rto) if rto else (21.7051, 72.9959)
+                elif rto:
+                    lat, lon = get_rto_coords(rto)
+                else:
+                    lat, lon = (21.7051, 72.9959)
+
+                profile = row.get("profile") or "GPCB (PSDN)"
+                if profile not in PACKET_BUILDERS:
+                    profile = "GPCB (PSDN)"
+
+                # Reuse initial blank device if untouched
+                if imported_count == 0 and len(self._devices) == 1 and 1 in self._devices:
+                    first_tab = self._devices[1]["tab"]
+                    if getattr(first_tab, "packet_count", 0) == 0 and not getattr(first_tab, "_running", False):
+                        dev_id = 1
+                    else:
+                        dev_id = self._add_device()
+                else:
+                    dev_id = self._add_device()
+
+                tab = self._devices[dev_id]["tab"]
+                tab.load_vehicle_info(imei=imei, vreg=vreg, lat=lat, lon=lon, profile=profile)
+                self._update_tile_profile(dev_id, profile)
+                imported_count += 1
+
+            messagebox.showinfo(
+                "Import Successful",
+                f"Successfully imported {imported_count} vehicle(s) from CSV!\nAll configured with profile GPCB (PSDN) on port 17003."
+            )
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Failed to parse CSV file:\n{e}")
 
     def open_location_link(self, raw_link: str) -> None:
         """Handle location link passed via CLI or Windows 'Open with'."""

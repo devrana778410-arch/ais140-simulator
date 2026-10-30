@@ -15,12 +15,14 @@ from .styles import COLORS, FONTS
 from .autocomplete import AutocompleteRTO
 from ..geo_link import find_nearest_rto
 
-PROFILES = ["VLTD", "CGM", "GPCB"]
+PROFILES = ["VLTD", "CGM", "GPCB", "GPCB (PSDN)"]
 
 # Server presets per profile
 PROFILE_SERVER = {
-    "CGM":  {"host": "103.234.162.150", "port": 5013, "connect_timeout": 10, "retry_delay": 5},
-    "GPCB": {"host": "103.234.162.31",  "port": 9999, "connect_timeout": 0.5, "retry_delay": 0.1},
+    "CGM":         {"host": "103.234.162.150", "port": 5013,  "connect_timeout": 10, "retry_delay": 5},
+    "GPCB":        {"host": "103.234.162.31",  "port": 9999,  "connect_timeout": 0.5, "retry_delay": 0.1},
+    "GPCB (PSDN)": {"host": "43.205.159.137",  "port": 17003, "connect_timeout": 10, "retry_delay": 5},
+    "PSDN":        {"host": "43.205.159.137",  "port": 17003, "connect_timeout": 10, "retry_delay": 5},
     "VLTD": {
         "host": "commonlayer.parivahan.gov.in",
         "port": 9031,             # Primary Port: $LGN, $HEL, $PVT
@@ -436,7 +438,7 @@ class DeviceTab(tk.Frame):
             self._hmac_frame.pack_forget()
             self._debug_btns_frame.pack(fill="x", pady=(4, 8))
 
-        elif profile == "GPCB":
+        elif profile in ("GPCB", "GPCB (PSDN)", "PSDN"):
             self._rto_lbl.grid_remove()
             self._rto_container.grid_remove()
             self._vreg_lbl.grid(row=1, column=0, sticky="w", pady=6)
@@ -657,4 +659,14 @@ class DeviceTab(tk.Frame):
         self._lon.delete(0, "end")
         self._lon.insert(0, f"{lon:.6f}")
         self.append_log(f"📍 Location Loaded: {lat:.6f}, {lon:.6f} -> Nearest RTO: {best_code} ({rto_name})")
+
+    def load_vehicle_info(self, imei: str, vreg: str = "GJ01AC0000", lat: float = 21.7051, lon: float = 72.9959, profile: str = "GPCB (PSDN)") -> None:
+        """Populate device tab inputs from imported CSV/Excel data."""
+        self._profile_var.set(profile)
+        self._apply_profile_visibility(profile)
+        self._imei.delete(0, "end")
+        self._imei.insert(0, str(imei).strip())
+        self._vreg.delete(0, "end")
+        self._vreg.insert(0, str(vreg).strip())
+        self.apply_coordinates(lat, lon)
 

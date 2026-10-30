@@ -177,6 +177,7 @@ class SimulatorService : Service() {
                 "VLTD" -> runVltdLoop()
                 "GPCB" -> runGpcbLoop()
                 "CGM"  -> runCgmLoop()
+                "PSDN", "GPCB (PSDN)" -> runPsdnLoop()
                 else   -> runVltdLoop()
             }
         }
@@ -261,6 +262,37 @@ class SimulatorService : Service() {
             cycle++
             val cfg = config.copy(seqNum = packetsSent + 1)
             val packet = Ais140Packet.buildCgmPacket(cfg)
+
+            try {
+                val bytes = packet.toByteArray(Charsets.UTF_8)
+                sock.getOutputStream().apply {
+                    write(bytes)
+                    flush()
+                }
+                packetsSent++
+                val preview = if (packet.length > 70) packet.substring(0, 70) + "..." else packet
+                broadcastLog("TX [${String.format(Locale.US, "%04d", packetsSent)}]: $preview")
+                broadcastStatus(STATUS_SENDING)
+                updateNotification("Sent: $packetsSent packets")
+            } catch (e: Exception) {
+                broadcastLog("Send failed (${e.message}) - reconnecting...")
+                closeSocket()
+                continue
+            }
+
+            delay(sendIntervalMs)
+        }
+    }
+
+    private suspend fun CoroutineScope.runPsdnLoop() {
+        var cycle = 0
+        while (isActive && isRunning) {
+            val sock = ensurePersistentSocket(serverHost, serverPort, timeoutMs = 10000, retryDelayMs = 5000L)
+            if (sock == null || !isRunning) break
+
+            cycle++
+            val cfg = config.copy(seqNum = packetsSent + 1)
+            val packet = Ais140Packet.buildPsdnPacket(cfg)
 
             try {
                 val bytes = packet.toByteArray(Charsets.UTF_8)

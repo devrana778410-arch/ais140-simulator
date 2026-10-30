@@ -107,6 +107,24 @@ object Ais140Packet {
     }
 
     /**
+     * Builds PSDN / ONTC GPCB packet format (reverse-engineered from base.apk).
+     * Format: $NRM,PSDN,1.ONTC,NR,01,L,<IMEI>,<VEHICLE_NO>,1,...C8CE79AC*
+     */
+    fun buildPsdnPacket(config: PacketConfig): String {
+        val (dateStr, timeStr) = getUtcCalendar()
+        val latStr = formatCoord(config.latitude, 3)
+        val lonStr = formatCoord(config.longitude, 3)
+        val op = if (config.operator.isNotBlank()) config.operator.lowercase(Locale.US) else "airtel"
+
+        return "\$NRM,PSDN,1.ONTC,NR,01,L,${config.imei},${config.vehicleReg},1," +
+                "$dateStr,$timeStr," +
+                "$latStr,N,$lonStr,E," +
+                "0.1,000.00,17,0044.98,1.00,0.59,$op,0,1,26.0,4.0,0,O,16,404,98," +
+                "140c,ee1,ed8,140c,11,edd,140c,03,0000,0000,00,0000,0000,00,0000,00," +
+                "0.000,0.000,002421,0.140,-,1.0,0,0,23_08_23_1_49._C_1_0_1_75,C8CE79AC*"
+    }
+
+    /**
      * Builds standard VLTD $LGN (Login) packet.
      * Format: $LGN,{VREG},{IMEI},{FW},AIS140,{LAT},{LON},*
      */

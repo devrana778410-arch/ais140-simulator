@@ -96,7 +96,7 @@ def receiver_loop(sock, stop_event):
                 stop_event.set()
             break
 
-def interactive_shell(sock, stop_event):
+def interactive_shell(sock, stop_event, imei=""):
     print("\n[+] Console ready. Type your commands below.")
     print("    Quick Shortcuts:")
     print("      'getstats'             -> GETSTATS (Reveals all 3 IPs, voltage, signal, SIM)")
@@ -108,6 +108,7 @@ def interactive_shell(sock, stop_event):
     print("      'setvrn <reg_no>'      -> SETVRN <reg_no> (Set Vehicle Number)")
     print("      'actv <phone>'         -> ACTV,<phone> (Activation handshake)")
     print("      'reset' / 'reboot'     -> RESET# (Reboot device MCU & modem)")
+    print("      'psdn'                 -> Send sample PSDN / ONTC test packet")
     print("      'help'                 -> Show full command cheatsheet")
     print("      'exit'                 -> Close connection & quit\n")
 
@@ -121,7 +122,10 @@ def interactive_shell(sock, stop_event):
                 break
 
             cmd_lower = cmd.lower()
-            if cmd_lower == "help":
+            if cmd_lower == "psdn":
+                from src.psdn_packet import build_packet as build_psdn
+                payload = build_psdn(imei=imei or "864000080731065", vreg="GJ01AC1234") + "\r\n"
+            elif cmd_lower == "help":
                 print_cheatsheet()
                 continue
             elif cmd_lower == "getstats":
@@ -179,8 +183,8 @@ def interactive_shell(sock, stop_event):
             break
 
 def mode_client():
-    host = input("Enter Target Host (default: tracktcp.gpsbull.com): ").strip() or "tracktcp.gpsbull.com"
-    port_str = input("Enter Target Port (default: 5179): ").strip() or "5179"
+    host = input("Enter Target Host (default: tracktcp.gpsbull.com, PSDN: 43.205.159.137): ").strip() or "tracktcp.gpsbull.com"
+    port_str = input("Enter Target Port (default: 5179, PSDN: 17003): ").strip() or "5179"
     port = int(port_str)
 
     imei = input("Enter Device IMEI (e.g. 864000080731065 or press Enter to skip): ").strip()
@@ -204,7 +208,7 @@ def mode_client():
     recv_thread = threading.Thread(target=receiver_loop, args=(sock, stop_event), daemon=True)
     recv_thread.start()
 
-    interactive_shell(sock, stop_event)
+    interactive_shell(sock, stop_event, imei)
     sock.close()
     print("\n[*] Disconnected.")
 

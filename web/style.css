@@ -141,6 +141,7 @@ body {
   font-weight: 700;
 }
 .badge-sky { background: #082f49; color: #38bdf8; }
+.badge-amber { background: #451a03; color: #f59e0b; }
 
 /* Cards */
 .card {
@@ -250,6 +251,7 @@ input:focus {
 .pill-dot.sky { background: #38bdf8; }
 .pill-dot.emerald { background: #34d399; }
 .pill-dot.violet { background: #a78bfa; }
+.pill-dot.amber { background: #f59e0b; }
 
 /* Autocomplete */
 .autocomplete-wrapper {
