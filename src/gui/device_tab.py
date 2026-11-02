@@ -236,7 +236,7 @@ class DeviceTab(tk.Frame):
         code, lat, lon = self._rto_input.get_rto()
         self._rto_coord_lbl.config(text=f"GPS Target: {lat:.6f}°N, {lon:.6f}°E  ({RTO_TABLE[code]['name']})")
 
-        # Fields: Manual Lat / Lon (CGM / GPCB)
+        # Fields: Manual Lat / Lon
         self._lat_lbl = tk.Label(
             self._inputs_card, text="Latitude:", font=FONTS["body_bold"],
             fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
@@ -247,7 +247,7 @@ class DeviceTab(tk.Frame):
             fg=COLORS["text_primary"], insertbackground=COLORS["text_primary"],
             relief="flat", highlightbackground=COLORS["border"], highlightthickness=1, width=14
         )
-        self._lat.insert(0, "21.749826")
+        self._lat.insert(0, f"{lat:.6f}")
         self._lat.pack(side="left")
         tk.Label(self._lat_frame, text="°N", fg=COLORS["text_secondary"], bg=COLORS["bg_card"]).pack(side="left", padx=4)
 
@@ -261,7 +261,7 @@ class DeviceTab(tk.Frame):
             fg=COLORS["text_primary"], insertbackground=COLORS["text_primary"],
             relief="flat", highlightbackground=COLORS["border"], highlightthickness=1, width=14
         )
-        self._lon.insert(0, "73.098231")
+        self._lon.insert(0, f"{lon:.6f}")
         self._lon.pack(side="left")
         tk.Label(self._lon_frame, text="°E", fg=COLORS["text_secondary"], bg=COLORS["bg_card"]).pack(side="left", padx=4)
 
@@ -388,12 +388,20 @@ class DeviceTab(tk.Frame):
             cursor="hand2", command=self._export_log
         ).pack(side="right")
 
+        log_container = tk.Frame(self._debug_drawer, bg=COLORS["bg_input"])
+        log_container.pack(fill="both", expand=True, pady=(2, 0))
+
+        log_scrollbar = ttk.Scrollbar(log_container, orient="vertical")
+        log_scrollbar.pack(side="right", fill="y")
+
         self._log = tk.Text(
-            self._debug_drawer, height=7, wrap="none", font=FONTS["code"],
+            log_container, height=15, wrap="none", font=FONTS["code"],
             state="disabled", bg="#050811", fg="#38bdf8", relief="flat",
-            highlightbackground=COLORS["border"], highlightthickness=1
+            highlightbackground=COLORS["border"], highlightthickness=1,
+            yscrollcommand=log_scrollbar.set
         )
-        self._log.pack(fill="both", expand=True)
+        self._log.pack(side="left", fill="both", expand=True)
+        log_scrollbar.config(command=self._log.yview)
 
         # Apply profile-specific view rules
         self._apply_profile_visibility("VLTD")
@@ -412,6 +420,11 @@ class DeviceTab(tk.Frame):
         """Called automatically when an RTO recommendation is selected."""
         name = RTO_TABLE.get(code, {}).get("name", "Unknown")
         self._rto_coord_lbl.config(text=f"GPS Target: {lat:.6f}°N, {lon:.6f}°E  ({name})")
+        if hasattr(self, "_lat") and hasattr(self, "_lon"):
+            self._lat.delete(0, tk.END)
+            self._lat.insert(0, f"{lat:.6f}")
+            self._lon.delete(0, tk.END)
+            self._lon.insert(0, f"{lon:.6f}")
 
     def _apply_profile_visibility(self, profile: str) -> None:
         """Update field layouts based on active profile."""
@@ -425,14 +438,14 @@ class DeviceTab(tk.Frame):
         if profile == "VLTD":
             self._vreg_lbl.grid_remove()
             self._vreg.grid_remove()
-            self._lat_lbl.grid_remove()
-            self._lat_frame.grid_remove()
-            self._lon_lbl.grid_remove()
-            self._lon_frame.grid_remove()
             self._rto_lbl.grid(row=1, column=0, sticky="w", pady=6)
             self._rto_container.grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=6)
-            self._interval_lbl.grid(row=2, column=0, sticky="w", pady=6)
-            self._interval_box.grid(row=2, column=1, sticky="w", padx=(12, 0), pady=6)
+            self._lat_lbl.grid(row=2, column=0, sticky="w", pady=6)
+            self._lat_frame.grid(row=2, column=1, sticky="w", padx=(12, 0), pady=6)
+            self._lon_lbl.grid(row=3, column=0, sticky="w", pady=6)
+            self._lon_frame.grid(row=3, column=1, sticky="w", padx=(12, 0), pady=6)
+            self._interval_lbl.grid(row=4, column=0, sticky="w", pady=6)
+            self._interval_box.grid(row=4, column=1, sticky="w", padx=(12, 0), pady=6)
             self._auto_sos_cb.pack(side="left", padx=(16, 0))
             self._emg_frame.pack(fill="x", padx=16, pady=(0, 12))
             self._hmac_frame.pack_forget()
@@ -542,17 +555,21 @@ class DeviceTab(tk.Frame):
             messagebox.showerror("Invalid Input", "IMEI must be a numeric string (10-15 digits).")
             return None
 
+        try:
+            lat = float(self._lat.get().strip())
+            lon = float(self._lon.get().strip())
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Latitude and Longitude must be decimal numbers.")
+            return None
+
         if profile == "VLTD":
-            rto_code, lat, lon = self._rto_input.get_rto()
+            rto_code, _, _ = self._rto_input.get_rto()
             vreg = "GJ01AC0000"
+        elif profile in ("GPCB", "GPCB (PSDN)", "PSDN"):
+            vreg = self._vreg.get().strip()
+            rto_code = None
         else:
-            try:
-                lat = float(self._lat.get().strip())
-                lon = float(self._lon.get().strip())
-            except ValueError:
-                messagebox.showerror("Invalid Input", "Latitude and Longitude must be decimal numbers.")
-                return None
-            vreg = self._vreg.get().strip() if profile == "GPCB" else "GJ01AC0000"
+            vreg = "GJ01AC0000"
             rto_code = None
 
         try:

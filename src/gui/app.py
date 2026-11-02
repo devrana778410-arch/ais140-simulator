@@ -46,7 +46,7 @@ class SimulatorApp:
         self.root = root
         self.root.title(f"{self.APP_TITLE} {self.APP_VERSION}")
         self.root.minsize(880, 620)
-        self.root.geometry("980x680")
+        self.root.geometry("1060x820")
         self.root.resizable(True, True)
 
         apply_theme(self.root)
@@ -171,9 +171,59 @@ class SimulatorApp:
             fg=COLORS["text_muted"], bg=COLORS["bg_sidebar"]
         ).pack(anchor="w", pady=(4, 0))
 
-        # ---------------- Right Main Viewport ---------------- #
-        self._main_viewport = tk.Frame(self.root, bg=COLORS["bg_app"])
-        self._main_viewport.grid(row=0, column=1, sticky="nsew")
+        # ---------------- Right Main Viewport (Scrollable) ---------------- #
+        self._viewport_outer = tk.Frame(self.root, bg=COLORS["bg_app"])
+        self._viewport_outer.grid(row=0, column=1, sticky="nsew")
+        self._viewport_outer.rowconfigure(0, weight=1)
+        self._viewport_outer.columnconfigure(0, weight=1)
+
+        self._viewport_canvas = tk.Canvas(
+            self._viewport_outer, bg=COLORS["bg_app"],
+            highlightthickness=0, bd=0
+        )
+        self._viewport_scrollbar = ttk.Scrollbar(
+            self._viewport_outer, orient="vertical", command=self._viewport_canvas.yview
+        )
+        self._viewport_canvas.configure(yscrollcommand=self._viewport_scrollbar.set)
+
+        self._viewport_canvas.grid(row=0, column=0, sticky="nsew")
+        self._viewport_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        self._main_viewport = tk.Frame(self._viewport_canvas, bg=COLORS["bg_app"])
+        self._viewport_window = self._viewport_canvas.create_window(
+            (0, 0), window=self._main_viewport, anchor="nw"
+        )
+
+        def _on_main_configure(event=None):
+            self._viewport_canvas.configure(scrollregion=self._viewport_canvas.bbox("all"))
+
+        self._main_viewport.bind("<Configure>", _on_main_configure)
+
+        def _on_canvas_resize(event):
+            self._viewport_canvas.itemconfig(self._viewport_window, width=event.width)
+
+        self._viewport_canvas.bind("<Configure>", _on_canvas_resize)
+
+        def _on_mousewheel(event):
+            if isinstance(event.widget, (tk.Text, tk.Listbox)):
+                return
+            bbox = self._viewport_canvas.bbox("all")
+            if bbox and (bbox[3] - bbox[1]) > self._viewport_canvas.winfo_height():
+                self._viewport_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _on_linux_scroll_up(event):
+            if isinstance(event.widget, (tk.Text, tk.Listbox)):
+                return
+            self._viewport_canvas.yview_scroll(-2, "units")
+
+        def _on_linux_scroll_down(event):
+            if isinstance(event.widget, (tk.Text, tk.Listbox)):
+                return
+            self._viewport_canvas.yview_scroll(2, "units")
+
+        self.root.bind_all("<MouseWheel>", _on_mousewheel)
+        self.root.bind_all("<Button-4>", _on_linux_scroll_up)
+        self.root.bind_all("<Button-5>", _on_linux_scroll_down)
 
         # ---------------- Top Bar: Location Link Extraction ---------------- #
         link_card = tk.Frame(
