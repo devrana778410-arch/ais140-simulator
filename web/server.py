@@ -33,7 +33,7 @@ PACKET_BUILDERS = {
 }
 
 PROFILE_SERVERS = {
-    "CGM":         {"host": "103.234.162.150", "port": 5013,  "connect_timeout": 10, "retry_delay": 5},
+    "CGM":         {"host": "103.234.162.150", "port": 5001,  "connect_timeout": 10, "retry_delay": 5},
     "GPCB":        {"host": "103.234.162.31",  "port": 9999,  "connect_timeout": 0.5, "retry_delay": 0.1},
     "PSDN":        {"host": "43.205.159.137",  "port": 17003, "connect_timeout": 10, "retry_delay": 5},
     "GPCB (PSDN)": {"host": "43.205.159.137",  "port": 17003, "connect_timeout": 10, "retry_delay": 5},

@@ -296,9 +296,9 @@ class ConfigFragment : Fragment() {
                     binding.hmacGroup.visibility = View.GONE
                 }
                 "CGM" -> {
-                    binding.tvServerBanner.text = "Server: 103.234.162.150:5013 (HMAC-SHA256 Signed)"
+                    binding.tvServerBanner.text = "Server: 103.234.162.150:5001 (HMAC-SHA256 Signed)"
                     binding.etHost.setText("103.234.162.150")
-                    binding.etPort.setText("5013")
+                    binding.etPort.setText("5001")
                     binding.rtoGroup.visibility = View.GONE
                     binding.sosButtonRow.visibility = View.GONE
                     binding.manualPushSection.visibility = View.GONE

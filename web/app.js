@@ -6,7 +6,7 @@ let rtoDatabase = {};
 
 const SERVERS = {
   VLTD: "commonlayer.parivahan.gov.in : 9031 (Emergency: :9032)",
-  CGM:  "103.234.162.150 : 5013 (Mines Gujarat)",
+  CGM:  "103.234.162.150 : 5001 (Mines Gujarat)",
   GPCB: "103.234.162.31 : 9999 (Pollution Control Board)",
   PSDN: "43.205.159.137 : 17003 (ONTC / PSDN GPCB Gateway)"
 };

@@ -19,7 +19,7 @@ PROFILES = ["VLTD", "CGM", "GPCB", "GPCB (PSDN)"]
 
 # Server presets per profile
 PROFILE_SERVER = {
-    "CGM":         {"host": "103.234.162.150", "port": 5013,  "connect_timeout": 10, "retry_delay": 5},
+    "CGM":         {"host": "103.234.162.150", "port": 5001,  "connect_timeout": 10, "retry_delay": 5},
     "GPCB":        {"host": "103.234.162.31",  "port": 9999,  "connect_timeout": 0.5, "retry_delay": 0.1},
     "GPCB (PSDN)": {"host": "43.205.159.137",  "port": 17003, "connect_timeout": 10, "retry_delay": 5},
     "PSDN":        {"host": "43.205.159.137",  "port": 17003, "connect_timeout": 10, "retry_delay": 5},
@@ -339,7 +339,7 @@ class DeviceTab(tk.Frame):
             self._hmac_frame, text="HMAC Key:", font=FONTS["body_bold"],
             fg=COLORS["text_secondary"], bg=COLORS["bg_input"]
         ).pack(side="left", padx=(0, 6))
-        self._hmac_var = tk.StringVar(value="26bcb9e368440d4a")
+        self._hmac_var = tk.StringVar(value="6ac1197229afb43f")
         self._hmac_entry = tk.Entry(
             self._hmac_frame, textvariable=self._hmac_var, width=20,
             font=FONTS["code"], bg=COLORS["bg_card"], fg=COLORS["text_primary"],

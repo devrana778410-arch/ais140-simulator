@@ -28,7 +28,7 @@ data class PacketConfig(
     val mnc: String = "51",
     val cellId: String = "16D5",
     val lac: String = "56C5",
-    val hmacKey: String = "26bcb9e368440d4a",
+    val hmacKey: String = "6ac1197229afb43f",
     val seqNum: Int = 1
 )
 
@@ -68,24 +68,40 @@ object Ais140Packet {
     }
 
     /**
-     * Builds standard CGM packet ($NMP wire format with trailing HMAC-SHA256).
+     * Computes 1-byte XOR checksum over UTF-8 bytes, formatted as 2-character hex string.
+     */
+    private fun computeHexChecksum(payload: String): String {
+        var x = 0
+        for (b in payload.toByteArray(Charsets.UTF_8)) {
+            x = x xor (b.toInt() and 0xFF)
+        }
+        return String.format(Locale.US, "%02X", x)
+    }
+
+    /**
+     * Builds standard CGM packet ($NRM Gagan format with pre-HMAC XOR checksum and trailing HMAC-SHA256).
+     * Matches reverse-engineered specifications from app-debug.apk.
      */
     fun buildCgmPacket(config: PacketConfig): String {
         val (dateStr, timeStr) = getUtcCalendar()
-        val latStr = formatCoord(config.latitude, 3)
-        val lonStr = formatCoord(config.longitude, 3)
-        val cellData = "16D5,56C5,56C2,16D5,14,5909,16D5,14,37CB,16D5,14,5980,16D5,14,0000"
+        val latStr = String.format(Locale.US, "%.6f", Math.abs(config.latitude))
+        val lonStr = String.format(Locale.US, "%.6f", Math.abs(config.longitude))
+        val opStr = if (config.operator.equals("airtel", ignoreCase = true)) "Airtel" else config.operator
+        val cellData = "14D0,E085,17,14D0,E086,13,14D0,C941,12,14CE,4BA0,00"
+        val seqStr = String.format(Locale.US, "%02d", config.seqNum)
 
-        val body = "\$NMP,${config.vendor},4.0.27,NR,01,L,${config.imei},${config.vehicleReg},1," +
+        val payload = "\$NRM,ROADRPA,1.3.1,NR,$seqStr,L,${config.imei},${config.vehicleReg},1," +
                 "$dateStr,$timeStr," +
                 "$latStr,N,$lonStr,E," +
                 String.format(Locale.US, "%.1f", config.speed) + "," +
                 String.format(Locale.US, "%.2f", config.heading) + "," +
-                "46,136.7,0.7,0.4,${config.operator},0,1,25.8,4.0,0,C,13,404,05," +
-                "$cellData,00,001994,0.80,0.00,0,(0,0,0)*"
+                "50,39.1,0.70,0.40,$opStr,1,1,28.0,5.6,0,C,23,404,98," +
+                "$cellData,00,0000,0000,1100,00,010672,44.290,44.640,2963.767,()*"
 
-        val signature = hmacSha256(config.hmacKey, body)
-        return "$body,$signature"
+        val xor = computeHexChecksum(payload)
+        val payloadWithXor = payload.replace("()*", "()*$xor")
+        val signature = hmacSha256(config.hmacKey, payloadWithXor)
+        return "$payloadWithXor,$signature\n"
     }
 
     /**

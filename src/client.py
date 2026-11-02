@@ -183,6 +183,25 @@ class DeviceClient:
     #  Internal Connection & Send Helpers                                  #
     # ------------------------------------------------------------------ #
 
+    def _check_server_replies(self) -> None:
+        """Non-blocking check for any data/replies sent back by server."""
+        if not self._sock:
+            return
+        try:
+            self._sock.setblocking(False)
+            data = self._sock.recv(4096)
+            self._sock.setblocking(True)
+            if data:
+                clean_reply = data.decode("utf-8", errors="replace").strip()
+                self.on_log(f"RX [Server Reply]: {clean_reply}")
+        except (BlockingIOError, socket.error):
+            try:
+                self._sock.setblocking(True)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def _close_socket(self) -> None:
         sock = self._sock
         if sock:
@@ -286,11 +305,13 @@ class DeviceClient:
                             packet = self.packet_builder(**cfg)
                             lbl = f"{self.packet_count + 1:04d}"
 
-                        self._sock.sendall(packet.encode("utf-8"))
+                        wire_data = packet if packet.endswith("\n") else packet + "\n"
+                        self._sock.sendall(wire_data.encode("utf-8"))
                         self.packet_count += 1
-                        preview = packet[:80] + "..." if len(packet) > 80 else packet
+                        preview = packet.strip()[:80] + "..." if len(packet.strip()) > 80 else packet.strip()
                         self.on_log(f"TX [{lbl}]: {preview}")
                         self.on_status("Sending", self.packet_count)
+                        self._check_server_replies()
                     except Exception as exc:
                         self.on_log(f"Send notice ({exc}) - auto-reconnecting next interval")
                         self._close_socket()
