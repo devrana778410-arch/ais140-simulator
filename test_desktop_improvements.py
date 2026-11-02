@@ -8,6 +8,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from src.gui.device_tab import DeviceTab
+from src.gui.app import SimulatorApp
 
 
 class TestDesktopImprovements(unittest.TestCase):
@@ -56,6 +57,39 @@ class TestDesktopImprovements(unittest.TestCase):
         # Verify log has yscrollcommand configured
         yscroll = tab._log.cget("yscrollcommand")
         self.assertTrue(bool(yscroll), "Log box must have vertical scrollbar configured")
+
+    def test_mousewheel_scrolling(self):
+        """Verify that mousewheel scrolls the canvas with both standard mouse and trackpads."""
+        win = tk.Toplevel(self.root)
+        app = SimulatorApp(win)
+        win.update()
+        app._toggle_debug_mode()
+        win.update()
+
+        dev_tab = app._devices[1]["tab"]
+
+        # 1. Standard mouse wheel down (-120)
+        before = app._viewport_canvas.yview()[0]
+        dev_tab._inputs_card.event_generate("<MouseWheel>", delta=-120, x=5, y=5)
+        win.update()
+        after = app._viewport_canvas.yview()[0]
+        self.assertGreater(after, before, "Mouse wheel down should scroll canvas downward")
+
+        # 2. Trackpad small delta (-30)
+        before = after
+        dev_tab._inputs_card.event_generate("<MouseWheel>", delta=-30, x=5, y=5)
+        win.update()
+        after = app._viewport_canvas.yview()[0]
+        self.assertGreater(after, before, "Trackpad small delta should scroll canvas downward")
+
+        # 3. Mouse wheel over empty log falls through to scroll canvas
+        before = after
+        dev_tab._log.event_generate("<MouseWheel>", delta=-120, x=5, y=5)
+        win.update()
+        after = app._viewport_canvas.yview()[0]
+        self.assertGreater(after, before, "Empty log should fall through to scroll canvas")
+
+        win.destroy()
 
 
 if __name__ == "__main__":

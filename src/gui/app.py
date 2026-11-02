@@ -204,26 +204,63 @@ class SimulatorApp:
 
         self._viewport_canvas.bind("<Configure>", _on_canvas_resize)
 
+        def _get_scroll_step(event):
+            delta = getattr(event, "delta", 0)
+            if delta:
+                if abs(delta) >= 120:
+                    return int(-1 * (delta / 120))
+                else:
+                    return -1 if delta > 0 else 1
+            num = getattr(event, "num", 0)
+            if num == 4:
+                return -1
+            elif num == 5:
+                return 1
+            return 0
+
         def _on_mousewheel(event):
-            if isinstance(event.widget, (tk.Text, tk.Listbox)):
+            step = _get_scroll_step(event)
+            if not step:
                 return
-            bbox = self._viewport_canvas.bbox("all")
-            if bbox and (bbox[3] - bbox[1]) > self._viewport_canvas.winfo_height():
-                self._viewport_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-        def _on_linux_scroll_up(event):
-            if isinstance(event.widget, (tk.Text, tk.Listbox)):
-                return
-            self._viewport_canvas.yview_scroll(-2, "units")
+            widget = event.widget
+            if isinstance(widget, str):
+                try:
+                    widget = self.root.nametowidget(widget)
+                except Exception:
+                    widget = None
 
-        def _on_linux_scroll_down(event):
-            if isinstance(event.widget, (tk.Text, tk.Listbox)):
+            # 1. If cursor is hovering over the sidebar, scroll the sidebar device list
+            cur = widget
+            in_sidebar = False
+            while cur and cur != self.root:
+                if cur == self._sidebar:
+                    in_sidebar = True
+                    break
+                cur = getattr(cur, "master", None)
+
+            if in_sidebar:
+                self._tiles_canvas.yview_scroll(step, "units")
                 return
-            self._viewport_canvas.yview_scroll(2, "units")
+
+            # 2. If hovering over a Text widget with its own scrollable content:
+            if isinstance(widget, tk.Text):
+                try:
+                    yv = widget.yview()
+                    can_scroll_up = (yv[0] > 0.001)
+                    can_scroll_down = (yv[1] < 0.999)
+                    if (step < 0 and can_scroll_up) or (step > 0 and can_scroll_down):
+                        widget.yview_scroll(step * 2, "units")
+                        return
+                except Exception:
+                    pass
+
+            # 3. Default: scroll main viewport canvas
+            self._viewport_canvas.yview_scroll(step, "units")
 
         self.root.bind_all("<MouseWheel>", _on_mousewheel)
-        self.root.bind_all("<Button-4>", _on_linux_scroll_up)
-        self.root.bind_all("<Button-5>", _on_linux_scroll_down)
+        self.root.bind_all("<Button-4>", _on_mousewheel)
+        self.root.bind_all("<Button-5>", _on_mousewheel)
 
         # ---------------- Top Bar: Location Link Extraction ---------------- #
         link_card = tk.Frame(
